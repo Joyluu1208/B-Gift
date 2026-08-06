@@ -1,10 +1,36 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon } from 'lucide-react';
 import { storage } from './storage.js';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+function fileToCompressedDataUrl(file, maxSize = 900, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxSize || height > maxSize) {
+          if (width > height) { height = Math.round((height * maxSize) / width); width = maxSize; }
+          else { width = Math.round((width * maxSize) / height); height = maxSize; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 const STATUS = [
   { key: 'moi', label: 'Mới', color: '#3D6B8A' },
@@ -214,6 +240,7 @@ export default function App() {
     { key: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
     { key: 'materials', label: 'Vật liệu', icon: Package },
     { key: 'products', label: 'Sản phẩm', icon: ShoppingBag },
+    { key: 'menu', label: 'Menu sản phẩm', icon: ImageIcon },
     { key: 'customers', label: 'Khách hàng', icon: Users },
     { key: 'orders', label: 'Đơn hàng', icon: ClipboardList },
   ];
@@ -271,6 +298,9 @@ export default function App() {
           )}
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost} />
+          )}
+          {tab === 'menu' && (
+            <MenuTab products={products} computeProductCost={computeProductCost} />
           )}
           {tab === 'customers' && (
             <CustomersTab customers={customers} saveCustomers={saveCustomers} orders={orders} />
@@ -432,7 +462,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
 
-  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [] });
+  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '' });
 
   const submit = (data) => {
     const exists = products.some((p) => p.id === data.id);
@@ -466,6 +496,9 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
                   onClick={() => setExpanded(isOpen ? null : p.id)}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {isOpen ? <ChevronUp size={16} color="#8A8574" /> : <ChevronDown size={16} color="#8A8574" />}
+                    {p.imageUrl && (
+                      <img src={p.imageUrl} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', border: '1px solid #E3DFD3' }} onError={(e) => { e.target.style.display = 'none'; }} />
+                    )}
                     <span style={{ fontWeight: 700, fontSize: 14.5 }}>{p.name}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
@@ -518,7 +551,23 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
 
 function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }) {
   const [form, setForm] = useState(data);
+  const [uploading, setUploading] = useState(false);
   const { cost, sell } = computeProductCost(form);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      setForm((f) => ({ ...f, imageUrl: dataUrl }));
+    } catch (err) {
+      console.error('Lỗi xử lý ảnh', err);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const addMaterialRow = () => {
     if (materials.length === 0) return;
@@ -535,6 +584,38 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
     <form onSubmit={(e) => { e.preventDefault(); if (!form.name.trim()) return; onSubmit(form); }}>
       <Field label="Tên sản phẩm">
         <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VD: Cửa sắt hoa văn" autoFocus />
+      </Field>
+
+      <Field label="Ảnh sản phẩm">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{
+            flex: '0 0 64px', width: 64, height: 64, borderRadius: 8, overflow: 'hidden',
+            background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {form.imageUrl ? (
+              <img src={form.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <ImageIcon size={20} color="#B8B3A2" />
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+              padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+              cursor: uploading ? 'default' : 'pointer', color: '#232019', opacity: uploading ? 0.6 : 1, width: 'fit-content',
+            }}>
+              <ImageIcon size={14} />
+              {uploading ? 'Đang xử lý ảnh...' : form.imageUrl ? 'Đổi ảnh khác' : 'Chọn ảnh từ máy'}
+              <input type="file" accept="image/*" onChange={handleFile} disabled={uploading} style={{ display: 'none' }} />
+            </label>
+            {form.imageUrl && !uploading && (
+              <button type="button" onClick={() => setForm((f) => ({ ...f, imageUrl: '' }))}
+                style={{ background: 'none', border: 'none', color: '#A8493F', fontSize: 12, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
+                Xoá ảnh
+              </button>
+            )}
+          </div>
+        </div>
       </Field>
 
       <Field label="Vật liệu sử dụng">
@@ -580,9 +661,56 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
         <Btn onClick={onCancel}>Huỷ</Btn>
-        <Btn variant="primary" type="submit"><Save size={14} /> Lưu</Btn>
+        <Btn variant="primary" type="submit" disabled={uploading}><Save size={14} /> Lưu</Btn>
       </div>
     </form>
+  );
+}
+
+function MenuTab({ products, computeProductCost }) {
+  const [search, setSearch] = useState('');
+  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+
+  if (products.length === 0) {
+    return (
+      <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>
+        Chưa có sản phẩm nào. Thêm sản phẩm ở tab "Sản phẩm" (kèm ảnh) để hiện ở đây.
+      </Card>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ position: 'relative', marginBottom: 18, maxWidth: 320 }}>
+        <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
+        <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+        {filtered.map((p) => {
+          const { sell } = computeProductCost(p);
+          return (
+            <div key={p.id} style={{
+              background: '#FFFFFF', borderRadius: 12, border: '1px solid #E3DFD3', overflow: 'hidden',
+              display: 'flex', flexDirection: 'column',
+            }}>
+              <div style={{ aspectRatio: '1 / 1', background: '#EFEBDE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {p.imageUrl ? (
+                  <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+                ) : null}
+                <div style={{ display: p.imageUrl ? 'none' : 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                  <ImageIcon size={28} color="#C7C2AE" />
+                </div>
+              </div>
+              <div style={{ padding: '10px 12px 12px' }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: '#1E2A38' }}>{p.name}</div>
+                <Money value={sell} size={14} bold />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
