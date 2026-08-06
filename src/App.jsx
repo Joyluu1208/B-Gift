@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import * as XLSX from 'xlsx';
 import { storage } from './storage.js';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
@@ -241,6 +242,59 @@ export default function App() {
 
   const orderTotal = (order) => (order.items || []).reduce((s, it) => s + it.price * it.qty, 0) + Number(order.shippingFee || 0);
 
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    const matSheet = materials.map((m) => ({
+      'Tên vật liệu': m.name, 'Đơn vị': m.unit, 'SL tồn': Number(m.stockQty || 0),
+      'Đơn giá': Number(m.unitPrice || 0), 'Thành tiền': Number(m.stockQty || 0) * Number(m.unitPrice || 0),
+      'Ghi chú': m.note || '',
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matSheet), 'Vật liệu');
+
+    const prodSheet = products.map((p) => {
+      const { cost, sell } = computeProductCost(p);
+      return {
+        'Tên sản phẩm': p.name,
+        'Chế độ giá': p.manualPrice ? 'Nhập tay' : 'Tính theo vật liệu',
+        'Giá vốn': cost == null ? '' : Math.round(cost),
+        'Giá bán': Math.round(sell),
+        'Chi phí công': Number(p.laborCost || 0),
+        'Lợi nhuận %': Number(p.profitPct || 0),
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodSheet), 'Sản phẩm');
+
+    const custSheet = customers.map((c) => ({
+      'Tên khách hàng': c.name, 'SĐT': c.phone || '', 'Nguồn': c.source || '',
+      'Tên Facebook': c.facebookName || '', 'Link Facebook': c.facebookLink || '',
+      'Địa chỉ': c.address || '', 'Ngày liên hệ': c.contactDate || '',
+      'Budget': Number(c.budget || 0), 'Ghi chú': c.note || '',
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(custSheet), 'Khách hàng');
+
+    const orderSheet = orders.map((o) => {
+      const custName = customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)';
+      const itemsText = (o.items || [])
+        .map((it) => `${it.manual ? it.name : (productMap[it.productId]?.name || '(đã xoá)')} x${it.qty}`)
+        .join('; ');
+      const total = orderTotal(o);
+      const remain = total - Number(o.depositAmount || 0);
+      return {
+        'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName,
+        'Trạng thái': STATUS.find((s) => s.key === o.status)?.label || o.status,
+        'Sản phẩm': itemsText, 'Tổng tiền': total, 'Phí ship': Number(o.shippingFee || 0),
+        'Hoa hồng': Number(o.commission || 0), 'Đã cọc': Number(o.depositAmount || 0),
+        'Còn phải thu': remain > 0 ? remain : 0,
+        'Hình thức giao': o.deliveryMethod || '', 'ĐV vận chuyển': o.shippingCarrier || '',
+        'Mã vận đơn': o.trackingCode || '', 'Nội dung in': o.printRequest || '', 'Ghi chú': o.note || '',
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderSheet), 'Đơn hàng');
+
+    XLSX.writeFile(wb, `bo-gift-so-lieu-${todayStr()}.xlsx`);
+  };
+
   const NAV = [
     { key: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
     { key: 'materials', label: 'Vật liệu', icon: Package },
@@ -261,7 +315,7 @@ export default function App() {
   return (
     <div style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', background: '#F2EFE6', minHeight: '100vh', color: '#232019' }}>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 16px' }}>
-        <header style={{ padding: '24px 0 16px', borderBottom: '2px solid #1E2A38' }}>
+        <header style={{ padding: '24px 0 16px', borderBottom: '2px solid #1E2A38', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
             <h1 style={{
               margin: 0, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 26,
@@ -273,6 +327,7 @@ export default function App() {
               Bơ Gift Biên Hòa
             </span>
           </div>
+          <Btn onClick={exportExcel}><Download size={14} /> Xuất Excel</Btn>
         </header>
 
         <nav style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E3DFD3', marginBottom: 20, overflowX: 'auto' }}>
@@ -385,7 +440,7 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
               padding: '12px 16px', borderBottom: i < recent.length - 1 ? '1px solid #EFEBDE' : 'none',
             }}>
               <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{customerMap[o.customerId]?.name || '(Khách lẻ)'}</div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)'}</div>
                 <div style={{ fontSize: 12, color: '#8A8574' }}>{o.orderDate}</div>
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -819,7 +874,7 @@ function CustomersTab({ customers, saveCustomers, orders }) {
 
   const openNew = () => setEditing({
     id: uid(), name: '', phone: '', address: '', note: '',
-    facebookName: '', facebookLink: '', source: '', birthday: '', contactDate: todayStr(), budget: 0,
+    facebookName: '', facebookLink: '', source: '', contactDate: todayStr(), budget: 0,
   });
 
   const submit = (data) => {
@@ -881,8 +936,19 @@ function CustomersTab({ customers, saveCustomers, orders }) {
   );
 }
 
+const CUSTOMER_SOURCES = [
+  'Bách Hóa Nhà Bơ',
+  'Bơ Gift',
+  'Giỏ quà tết 3k follow',
+  'Giỏ quà tết 30k follow',
+  'Khách hàng cũ giới thiệu',
+  'Khách cũ đã đặt hàng',
+  'Khách liên hệ Zalo',
+];
+
 function CustomerForm({ data, onSubmit, onCancel }) {
   const [form, setForm] = useState(data);
+  const isKnownSource = !form.source || CUSTOMER_SOURCES.includes(form.source);
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!form.name.trim()) return; onSubmit(form); }}>
       <Field label="Tên khách hàng">
@@ -896,7 +962,16 @@ function CustomerForm({ data, onSubmit, onCancel }) {
         </div>
         <div style={{ flex: 1 }}>
           <Field label="Nguồn">
-            <input style={inputStyle} value={form.source || ''} onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="Facebook, giới thiệu..." />
+            <select style={inputStyle} value={isKnownSource ? (form.source || '') : '__other__'}
+              onChange={(e) => setForm({ ...form, source: e.target.value === '__other__' ? '' : e.target.value })}>
+              <option value="">— Chọn nguồn —</option>
+              {CUSTOMER_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+              <option value="__other__">Khác (tự nhập)...</option>
+            </select>
+            {!isKnownSource && (
+              <input style={{ ...inputStyle, marginTop: 6 }} value={form.source || ''}
+                onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="Nhập nguồn khác" autoFocus />
+            )}
           </Field>
         </div>
       </div>
@@ -915,18 +990,9 @@ function CustomerForm({ data, onSubmit, onCancel }) {
       <Field label="Địa chỉ">
         <input style={inputStyle} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
       </Field>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Ngày liên hệ">
-            <input style={inputStyle} type="date" value={form.contactDate || ''} onChange={(e) => setForm({ ...form, contactDate: e.target.value })} />
-          </Field>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Field label="Ngày sinh (nếu có)">
-            <input style={inputStyle} type="date" value={form.birthday || ''} onChange={(e) => setForm({ ...form, birthday: e.target.value })} />
-          </Field>
-        </div>
-      </div>
+      <Field label="Ngày liên hệ">
+        <input style={inputStyle} type="date" value={form.contactDate || ''} onChange={(e) => setForm({ ...form, contactDate: e.target.value })} />
+      </Field>
       <Field label="Budget dự kiến (đ)">
         <input style={inputStyle} type="number" min="0" value={form.budget || 0} onChange={(e) => setForm({ ...form, budget: Number(e.target.value) })} />
       </Field>
@@ -950,7 +1016,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
   const sorted = [...filtered].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
 
   const openNew = () => setEditing({
-    id: uid(), customerId: customers[0]?.id || '', orderDate: todayStr(), deliveryDate: '',
+    id: uid(), customerId: customers[0]?.id || '', customerName: '', orderDate: todayStr(), deliveryDate: '',
     status: 'moi', note: '', items: [], shippingFee: 0, depositAmount: 0,
     deliveryMethod: '', shippingCarrier: '', trackingCode: '', commission: 0, printRequest: '',
   });
@@ -989,14 +1055,8 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
             color: onlyUnpaid ? '#fff' : '#6B6759', fontWeight: 600,
           }}>Còn phải thu tiền</button>
         </div>
-        <Btn variant="primary" onClick={openNew} disabled={customers.length === 0}><Plus size={15} /> Tạo đơn hàng</Btn>
+        <Btn variant="primary" onClick={openNew}><Plus size={15} /> Tạo đơn hàng</Btn>
       </div>
-
-      {customers.length === 0 && (
-        <Card style={{ padding: '10px 16px', marginBottom: 14, background: '#FBF0DE', border: '1px solid #E9D3AC', color: '#7A4A16', fontSize: 13 }}>
-          Hãy thêm khách hàng trước khi tạo đơn hàng.
-        </Card>
-      )}
 
       {sorted.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>Không có đơn hàng nào.</Card>
@@ -1006,7 +1066,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
             <Card key={o.id} style={{ padding: '12px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14.5 }}>{customerMap[o.customerId]?.name || '(Khách lẻ)'}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14.5 }}>{customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)'}</div>
                   <div style={{ fontSize: 12, color: '#8A8574' }}>
                     Đặt: {o.orderDate}{o.deliveryDate ? ` · Giao: ${o.deliveryDate}` : ''}
                     {o.deliveryMethod ? ` · ${o.deliveryMethod}` : ''}
@@ -1109,13 +1169,22 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
   const removeItem = (idx) => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!form.customerId) return; onSubmit(form); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!form.customerId && !form.customerName.trim()) return; onSubmit(form); }}>
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <Field label="Khách hàng">
-            <select style={inputStyle} value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            {customers.length > 0 ? (
+              <select style={inputStyle} value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, customerName: '' })}>
+                <option value="">— Nhập tên tay bên dưới —</option>
+                {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            ) : (
+              <div style={{ fontSize: 12.5, color: '#8A8574', marginBottom: 2 }}>Chưa có khách trong danh bạ — nhập tên tay bên dưới.</div>
+            )}
+            {!form.customerId && (
+              <input style={{ ...inputStyle, marginTop: 6 }} value={form.customerName || ''}
+                onChange={(e) => setForm({ ...form, customerName: e.target.value })} placeholder="Tên khách (không lưu vào danh bạ)" />
+            )}
           </Field>
         </div>
         <div style={{ flex: 1 }}>
@@ -1246,7 +1315,7 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
         <Btn onClick={onCancel}>Huỷ</Btn>
-        <Btn variant="primary" type="submit" disabled={!form.customerId}><Save size={14} /> Lưu đơn hàng</Btn>
+        <Btn variant="primary" type="submit" disabled={!form.customerId && !form.customerName.trim()}><Save size={14} /> Lưu đơn hàng</Btn>
       </div>
     </form>
   );
