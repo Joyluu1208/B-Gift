@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon } from 'lucide-react';
-import { storage } from './storage.js';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { storage } from './storage.js';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -686,13 +686,13 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
           <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38' }}>Tự nhập giá bán tay</div>
           <div style={{ fontSize: 11.5, color: '#8A8574' }}>Bật lên nếu chưa kịp nhập đủ vật liệu — gõ thẳng giá bán, khỏi cần tính</div>
         </div>
-        <label style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, flex: '0 0 auto' }}>
+        <label style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, flex: '0 0 auto', cursor: 'pointer' }}>
           <input type="checkbox" checked={!!form.manualPrice} onChange={(e) => setForm({ ...form, manualPrice: e.target.checked })}
-            style={{ opacity: 0, width: 0, height: 0 }} />
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', margin: 0, opacity: 0, cursor: 'pointer', zIndex: 1 }} />
           <span style={{
-            position: 'absolute', inset: 0, borderRadius: 22, cursor: 'pointer',
+            position: 'absolute', inset: 0, borderRadius: 22, cursor: 'pointer', pointerEvents: 'none',
             background: form.manualPrice ? '#1E2A38' : '#D7D2C2', transition: 'background 0.15s',
-          }} onClick={() => setForm({ ...form, manualPrice: !form.manualPrice })}>
+          }}>
             <span style={{
               position: 'absolute', top: 3, left: form.manualPrice ? 21 : 3, width: 16, height: 16,
               borderRadius: '50%', background: '#fff', transition: 'left 0.15s',
