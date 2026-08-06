@@ -1102,12 +1102,29 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
               })()}
               {((o.items || []).length > 0 || Number(o.shippingFee) > 0) && (
                 <div style={{ marginTop: 8, borderTop: '1px solid #EFEBDE', paddingTop: 8, fontSize: 12.5, color: '#6B6759' }}>
-                  {o.items.map((it, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                      <span>{it.manual ? it.name : (productMap[it.productId]?.name || '(đã xoá)')} × {it.qty}</span>
-                      <span>{fmtVND(it.price * it.qty)}</span>
-                    </div>
-                  ))}
+                  {o.items.map((it, i) => {
+                    const prod = !it.manual ? productMap[it.productId] : null;
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {!it.manual && (
+                            <span style={{
+                              flex: '0 0 24px', width: 24, height: 24, borderRadius: 4, overflow: 'hidden',
+                              background: '#EFEBDE', border: '1px solid #E3DFD3', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {prod?.imageUrl ? (
+                                <img src={prod.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              ) : (
+                                <ImageIcon size={12} color="#B8B3A2" />
+                              )}
+                            </span>
+                          )}
+                          {it.manual ? it.name : (prod?.name || '(đã xoá)')} × {it.qty}
+                        </span>
+                        <span>{fmtVND(it.price * it.qty)}</span>
+                      </div>
+                    );
+                  })}
                   {Number(o.shippingFee) > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
                       <span>Phí ship</span>
@@ -1210,20 +1227,35 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
       </div>
 
       <Field label="Sản phẩm / nội dung trong đơn">
-        {(form.items || []).map((it, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-            {it.manual ? (
-              <input style={{ ...inputStyle, flex: 2 }} value={it.name} onChange={(e) => updateItem(idx, 'name', e.target.value)} placeholder="Tên/loại sản phẩm (nhập tay)" />
-            ) : (
-              <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            )}
-            <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
-            <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
-            <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
-          </div>
-        ))}
+        {(form.items || []).map((it, idx) => {
+          const selectedProduct = !it.manual ? products.find((p) => p.id === it.productId) : null;
+          return (
+            <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+              {!it.manual && (
+                <div style={{
+                  flex: '0 0 36px', width: 36, height: 36, borderRadius: 6, overflow: 'hidden',
+                  background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {selectedProduct?.imageUrl ? (
+                    <img src={selectedProduct.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <ImageIcon size={15} color="#B8B3A2" />
+                  )}
+                </div>
+              )}
+              {it.manual ? (
+                <input style={{ ...inputStyle, flex: 2 }} value={it.name} onChange={(e) => updateItem(idx, 'name', e.target.value)} placeholder="Tên/loại sản phẩm (nhập tay)" />
+              ) : (
+                <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
+                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
+              <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
+              <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
+              <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+            </div>
+          );
+        })}
         <div style={{ display: 'flex', gap: 8 }}>
           {products.length > 0 && <Btn onClick={addProductItem}><Plus size={13} /> Chọn từ sản phẩm</Btn>}
           <Btn onClick={addManualItem}><Plus size={13} /> Nhập tay</Btn>
