@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon } from 'lucide-react';
 import { storage } from './storage.js';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -225,6 +226,10 @@ export default function App() {
   const customerMap = useMemo(() => Object.fromEntries(customers.map((c) => [c.id, c])), [customers]);
 
   const computeProductCost = (prod) => {
+    if (prod.manualPrice) {
+      const sell = Number(prod.manualSellPrice || 0);
+      return { cost: null, sell };
+    }
     const matCost = (prod.materials || []).reduce((sum, mi) => {
       const m = materialMap[mi.materialId];
       return sum + (m ? m.unitPrice * mi.qty : 0);
@@ -265,7 +270,7 @@ export default function App() {
               Sổ Sách Kinh Doanh
             </h1>
             <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>
-              vật liệu · giá bán · đơn hàng
+              Bơ Gift Biên Hòa
             </span>
           </div>
         </header>
@@ -331,6 +336,21 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
   const pending = orders.filter((o) => o.status === 'moi' || o.status === 'dangLam').length;
   const recent = [...orders].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '')).slice(0, 6);
 
+  const monthlyRevenue = useMemo(() => {
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: d.toISOString().slice(0, 7), label: `T${d.getMonth() + 1}` });
+    }
+    return months.map(({ key, label }) => {
+      const total = orders
+        .filter((o) => (o.orderDate || '').startsWith(key) && o.status !== 'huy')
+        .reduce((s, o) => s + orderTotal(o), 0);
+      return { label, total };
+    });
+  }, [orders, orderTotal]);
+
   return (
     <div>
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
@@ -339,6 +359,20 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
         <StatCard label="Đơn đang xử lý" value={pending} accent="#B8763B" />
         <StatCard label="Doanh thu tháng này" value={fmtVND(revenue)} accent="#5C7A5E" />
       </div>
+
+      <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Doanh thu 6 tháng gần đây</h3>
+      <Card style={{ padding: '16px 16px 8px', marginBottom: 24, height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={monthlyRevenue} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E3DFD3" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8A8574' }} axisLine={{ stroke: '#D7D2C2' }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: '#8A8574' }} axisLine={false} tickLine={false}
+              tickFormatter={(v) => (v >= 1000000 ? `${Math.round(v / 1000000)}tr` : v >= 1000 ? `${Math.round(v / 1000)}k` : v)} />
+            <Tooltip formatter={(v) => fmtVND(v)} contentStyle={{ fontSize: 12.5, borderRadius: 8, border: '1px solid #E3DFD3' }} />
+            <Bar dataKey="total" name="Doanh thu" fill="#B8763B" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
 
       <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Đơn hàng gần đây</h3>
       {recent.length === 0 ? (
@@ -370,8 +404,9 @@ function MaterialsTab({ materials, saveMaterials }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const filtered = materials.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+  const totalStockValue = materials.reduce((s, m) => s + Number(m.stockQty || 0) * Number(m.unitPrice || 0), 0);
 
-  const openNew = () => setEditing({ id: uid(), name: '', unit: '', unitPrice: 0, note: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', unit: '', unitPrice: 0, stockQty: 0, note: '' });
 
   const submit = (data) => {
     const exists = materials.some((m) => m.id === data.id);
@@ -392,23 +427,32 @@ function MaterialsTab({ materials, saveMaterials }) {
         <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
       </div>
 
+      {materials.length > 0 && (
+        <Card style={{ padding: '10px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: '#6B6759', fontWeight: 600 }}>Tổng giá trị tồn kho</span>
+          <Money value={totalStockValue} size={15} bold />
+        </Card>
+      )}
+
       {filtered.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>
           {materials.length === 0 ? 'Chưa có vật liệu nào. Thêm vật liệu để bắt đầu tính giá vốn sản phẩm.' : 'Không tìm thấy vật liệu phù hợp.'}
         </Card>
       ) : (
-        <Card style={{ overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759' }}>
-            <div>Tên vật liệu</div><div>Đơn vị</div><div>Đơn giá</div><div>Ghi chú</div><div></div>
+        <Card style={{ overflow: 'auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 0.9fr 1fr 1.1fr 1.4fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 720 }}>
+            <div>Tên vật liệu</div><div>Đơn vị</div><div>SL tồn</div><div>Đơn giá</div><div>Thành tiền</div><div>Ghi chú</div><div></div>
           </div>
           {filtered.map((m, i) => (
             <div key={m.id} style={{
-              display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr auto', padding: '10px 16px', alignItems: 'center',
-              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5,
+              display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 0.9fr 1fr 1.1fr 1.4fr auto', padding: '10px 16px', alignItems: 'center',
+              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 720,
             }}>
               <div style={{ fontWeight: 600 }}>{m.name}</div>
               <div style={{ color: '#6B6759' }}>{m.unit}</div>
+              <div style={{ color: Number(m.stockQty) <= 0 ? '#A8493F' : '#232019', fontWeight: 600 }}>{m.stockQty || 0}</div>
               <div><Money value={m.unitPrice} size={12.5} /></div>
+              <div><Money value={Number(m.stockQty || 0) * Number(m.unitPrice || 0)} size={12.5} bold /></div>
               <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.note}</div>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button onClick={() => setEditing(m)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
@@ -430,6 +474,7 @@ function MaterialsTab({ materials, saveMaterials }) {
 
 function MaterialForm({ data, onSubmit, onCancel }) {
   const [form, setForm] = useState(data);
+  const thanhTien = Number(form.stockQty || 0) * Number(form.unitPrice || 0);
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!form.name.trim()) return; onSubmit(form); }}>
       <Field label="Tên vật liệu">
@@ -442,14 +487,21 @@ function MaterialForm({ data, onSubmit, onCancel }) {
           </Field>
         </div>
         <div style={{ flex: 1 }}>
-          <Field label="Đơn giá nhập (đ)">
-            <input style={inputStyle} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
+          <Field label="Số lượng tồn (nhập)">
+            <input style={inputStyle} type="number" min="0" step="0.01" value={form.stockQty || 0} onChange={(e) => setForm({ ...form, stockQty: Number(e.target.value) })} />
           </Field>
         </div>
       </div>
+      <Field label="Đơn giá nhập (đ)">
+        <input style={inputStyle} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
+      </Field>
       <Field label="Ghi chú">
         <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Nhà cung cấp, quy cách..." />
       </Field>
+      <div style={{ background: '#EFEBDE', borderRadius: 8, padding: '10px 14px', marginBottom: 4, display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
+        <span>Thành tiền (tồn kho)</span>
+        <Money value={thanhTien} size={14} bold />
+      </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
         <Btn onClick={onCancel}>Huỷ</Btn>
         <Btn variant="primary" type="submit"><Save size={14} /> Lưu</Btn>
@@ -462,7 +514,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
 
-  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0 });
 
   const submit = (data) => {
     const exists = products.some((p) => p.id === data.id);
@@ -502,7 +554,9 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
                     <span style={{ fontWeight: 700, fontSize: 14.5 }}>{p.name}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                    <div style={{ fontSize: 12, color: '#8A8574' }}>Giá vốn <Money value={cost} size={12} /></div>
+                    {!p.manualPrice && (
+                      <div style={{ fontSize: 12, color: '#8A8574' }}>Giá vốn <Money value={cost} size={12} /></div>
+                    )}
                     <div style={{ fontSize: 12, color: '#8A8574' }}>Giá bán <Money value={sell} size={13} bold /></div>
                     <button onClick={(e) => { e.stopPropagation(); setEditing(p); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
                     <button onClick={(e) => { e.stopPropagation(); remove(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
@@ -510,28 +564,34 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
                 </div>
                 {isOpen && (
                   <div style={{ borderTop: '1px solid #EFEBDE', padding: '12px 16px', fontSize: 13 }}>
-                    {(p.materials || []).length === 0 ? (
-                      <div style={{ color: '#8A8574' }}>Không có vật liệu nào được gán.</div>
+                    {p.manualPrice ? (
+                      <div style={{ color: '#8A8574' }}>Giá nhập tay, chưa tính theo vật liệu.</div>
                     ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <tbody>
-                          {p.materials.map((mi, idx) => {
-                            const m = materials.find((x) => x.id === mi.materialId);
-                            if (!m) return null;
-                            return (
-                              <tr key={idx}>
-                                <td style={{ padding: '3px 0', color: '#232019' }}>{m.name}</td>
-                                <td style={{ padding: '3px 0', color: '#8A8574', textAlign: 'right' }}>{mi.qty} {m.unit}</td>
-                                <td style={{ padding: '3px 0 3px 12px', textAlign: 'right' }}><Money value={m.unitPrice * mi.qty} size={12} /></td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      <>
+                        {(p.materials || []).length === 0 ? (
+                          <div style={{ color: '#8A8574' }}>Không có vật liệu nào được gán.</div>
+                        ) : (
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <tbody>
+                              {p.materials.map((mi, idx) => {
+                                const m = materials.find((x) => x.id === mi.materialId);
+                                if (!m) return null;
+                                return (
+                                  <tr key={idx}>
+                                    <td style={{ padding: '3px 0', color: '#232019' }}>{m.name}</td>
+                                    <td style={{ padding: '3px 0', color: '#8A8574', textAlign: 'right' }}>{mi.qty} {m.unit}</td>
+                                    <td style={{ padding: '3px 0 3px 12px', textAlign: 'right' }}><Money value={m.unitPrice * mi.qty} size={12} /></td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                        <div style={{ marginTop: 8, color: '#8A8574', fontSize: 12.5 }}>
+                          Chi phí công: <Money value={p.laborCost} size={12} /> · Lợi nhuận: {p.profitPct}%
+                        </div>
+                      </>
                     )}
-                    <div style={{ marginTop: 8, color: '#8A8574', fontSize: 12.5 }}>
-                      Chi phí công: <Money value={p.laborCost} size={12} /> · Lợi nhuận: {p.profitPct}%
-                    </div>
                   </div>
                 )}
               </Card>
@@ -618,45 +678,83 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
         </div>
       </Field>
 
-      <Field label="Vật liệu sử dụng">
-        {materials.length === 0 ? (
-          <div style={{ fontSize: 13, color: '#8A8574' }}>Chưa có vật liệu — thêm ở tab "Vật liệu" trước.</div>
-        ) : (
-          <>
-            {(form.materials || []).map((mi, idx) => {
-              const m = materials.find((x) => x.id === mi.materialId);
-              return (
-                <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                  <select style={{ ...inputStyle, flex: 2 }} value={mi.materialId} onChange={(e) => updateRow(idx, 'materialId', e.target.value)}>
-                    {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
-                  </select>
-                  <input style={{ ...inputStyle, flex: 1 }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} />
-                  <span style={{ fontSize: 12, color: '#8A8574', minWidth: 30 }}>{m?.unit}</span>
-                  <button type="button" onClick={() => removeRow(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
-                </div>
-              );
-            })}
-            <Btn onClick={addMaterialRow} style={{ marginTop: 4 }}><Plus size={13} /> Thêm vật liệu</Btn>
-          </>
-        )}
-      </Field>
-
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Chi phí công (đ)">
-            <input style={inputStyle} type="number" min="0" value={form.laborCost} onChange={(e) => setForm({ ...form, laborCost: Number(e.target.value) })} />
-          </Field>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        background: '#EFEBDE', borderRadius: 8, padding: '10px 12px', marginBottom: 14,
+      }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38' }}>Tự nhập giá bán tay</div>
+          <div style={{ fontSize: 11.5, color: '#8A8574' }}>Bật lên nếu chưa kịp nhập đủ vật liệu — gõ thẳng giá bán, khỏi cần tính</div>
         </div>
-        <div style={{ flex: 1 }}>
-          <Field label="Lợi nhuận (%)">
-            <input style={inputStyle} type="number" min="0" value={form.profitPct} onChange={(e) => setForm({ ...form, profitPct: Number(e.target.value) })} />
-          </Field>
-        </div>
+        <label style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, flex: '0 0 auto' }}>
+          <input type="checkbox" checked={!!form.manualPrice} onChange={(e) => setForm({ ...form, manualPrice: e.target.checked })}
+            style={{ opacity: 0, width: 0, height: 0 }} />
+          <span style={{
+            position: 'absolute', inset: 0, borderRadius: 22, cursor: 'pointer',
+            background: form.manualPrice ? '#1E2A38' : '#D7D2C2', transition: 'background 0.15s',
+          }} onClick={() => setForm({ ...form, manualPrice: !form.manualPrice })}>
+            <span style={{
+              position: 'absolute', top: 3, left: form.manualPrice ? 21 : 3, width: 16, height: 16,
+              borderRadius: '50%', background: '#fff', transition: 'left 0.15s',
+            }} />
+          </span>
+        </label>
       </div>
 
+      {form.manualPrice ? (
+        <Field label="Giá bán (đ)">
+          <input style={inputStyle} type="number" min="0" value={form.manualSellPrice || 0}
+            onChange={(e) => setForm({ ...form, manualSellPrice: Number(e.target.value) })} placeholder="Nhập giá bán" autoFocus={!form.name} />
+        </Field>
+      ) : (
+        <>
+          <Field label="Vật liệu sử dụng">
+            {materials.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#8A8574' }}>Chưa có vật liệu — thêm ở tab "Vật liệu" trước.</div>
+            ) : (
+              <>
+                {(form.materials || []).map((mi, idx) => {
+                  const m = materials.find((x) => x.id === mi.materialId);
+                  return (
+                    <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                      <select style={{ ...inputStyle, flex: 2 }} value={mi.materialId} onChange={(e) => updateRow(idx, 'materialId', e.target.value)}>
+                        {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
+                      </select>
+                      <input style={{ ...inputStyle, flex: 1 }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} />
+                      <span style={{ fontSize: 12, color: '#8A8574', minWidth: 30 }}>{m?.unit}</span>
+                      <button type="button" onClick={() => removeRow(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+                    </div>
+                  );
+                })}
+                <Btn onClick={addMaterialRow} style={{ marginTop: 4 }}><Plus size={13} /> Thêm vật liệu</Btn>
+              </>
+            )}
+          </Field>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <Field label="Chi phí công (đ)">
+                <input style={inputStyle} type="number" min="0" value={form.laborCost} onChange={(e) => setForm({ ...form, laborCost: Number(e.target.value) })} />
+              </Field>
+            </div>
+            <div style={{ flex: 1 }}>
+              <Field label="Lợi nhuận (%)">
+                <input style={inputStyle} type="number" min="0" value={form.profitPct} onChange={(e) => setForm({ ...form, profitPct: Number(e.target.value) })} />
+              </Field>
+            </div>
+          </div>
+        </>
+      )}
+
       <div style={{ background: '#EFEBDE', borderRadius: 8, padding: '10px 14px', marginTop: 4, display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
-        <span>Giá vốn: <Money value={cost} size={13} /></span>
-        <span>Giá bán đề xuất: <Money value={sell} size={14} bold /></span>
+        {form.manualPrice ? (
+          <span>Giá bán: <Money value={sell} size={14} bold /></span>
+        ) : (
+          <>
+            <span>Giá vốn: <Money value={cost} size={13} /></span>
+            <span>Giá bán đề xuất: <Money value={sell} size={14} bold /></span>
+          </>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
@@ -719,7 +817,10 @@ function CustomersTab({ customers, saveCustomers, orders }) {
   const [search, setSearch] = useState('');
   const filtered = customers.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search));
 
-  const openNew = () => setEditing({ id: uid(), name: '', phone: '', address: '', note: '' });
+  const openNew = () => setEditing({
+    id: uid(), name: '', phone: '', address: '', note: '',
+    facebookName: '', facebookLink: '', source: '', birthday: '', contactDate: todayStr(), budget: 0,
+  });
 
   const submit = (data) => {
     const exists = customers.some((c) => c.id === data.id);
@@ -749,10 +850,15 @@ function CustomersTab({ customers, saveCustomers, orders }) {
           {filtered.map((c) => {
             const count = orders.filter((o) => o.customerId === c.id).length;
             return (
-              <Card key={c.id} style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Card key={c.id} style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
                   <div style={{ fontSize: 12.5, color: '#8A8574' }}>{c.phone}{c.address ? ` · ${c.address}` : ''}</div>
+                  <div style={{ fontSize: 12, color: '#8A8574', marginTop: 2 }}>
+                    {c.source && <span>Nguồn: {c.source}</span>}
+                    {c.facebookName && <span>{c.source ? ' · ' : ''}FB: {c.facebookName}</span>}
+                    {c.budget > 0 && <span> · Budget: {fmtVND(c.budget)}</span>}
+                  </div>
                   {c.note && <div style={{ fontSize: 12, color: '#B8763B', marginTop: 2 }}>{c.note}</div>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -767,7 +873,7 @@ function CustomersTab({ customers, saveCustomers, orders }) {
       )}
 
       {editing && (
-        <Modal title={customers.some((c) => c.id === editing.id) ? 'Sửa khách hàng' : 'Thêm khách hàng'} onClose={() => setEditing(null)}>
+        <Modal title={customers.some((c) => c.id === editing.id) ? 'Sửa khách hàng' : 'Thêm khách hàng'} onClose={() => setEditing(null)} width={520}>
           <CustomerForm data={editing} onSubmit={submit} onCancel={() => setEditing(null)} />
         </Modal>
       )}
@@ -782,11 +888,47 @@ function CustomerForm({ data, onSubmit, onCancel }) {
       <Field label="Tên khách hàng">
         <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
       </Field>
-      <Field label="Số điện thoại">
-        <input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-      </Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Số điện thoại">
+            <input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Nguồn">
+            <input style={inputStyle} value={form.source || ''} onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="Facebook, giới thiệu..." />
+          </Field>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Tên Facebook">
+            <input style={inputStyle} value={form.facebookName || ''} onChange={(e) => setForm({ ...form, facebookName: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Link Facebook">
+            <input style={inputStyle} value={form.facebookLink || ''} onChange={(e) => setForm({ ...form, facebookLink: e.target.value })} placeholder="https://facebook.com/..." />
+          </Field>
+        </div>
+      </div>
       <Field label="Địa chỉ">
         <input style={inputStyle} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+      </Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Ngày liên hệ">
+            <input style={inputStyle} type="date" value={form.contactDate || ''} onChange={(e) => setForm({ ...form, contactDate: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Ngày sinh (nếu có)">
+            <input style={inputStyle} type="date" value={form.birthday || ''} onChange={(e) => setForm({ ...form, birthday: e.target.value })} />
+          </Field>
+        </div>
+      </div>
+      <Field label="Budget dự kiến (đ)">
+        <input style={inputStyle} type="number" min="0" value={form.budget || 0} onChange={(e) => setForm({ ...form, budget: Number(e.target.value) })} />
       </Field>
       <Field label="Ghi chú">
         <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
@@ -810,6 +952,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
   const openNew = () => setEditing({
     id: uid(), customerId: customers[0]?.id || '', orderDate: todayStr(), deliveryDate: '',
     status: 'moi', note: '', items: [], shippingFee: 0, depositAmount: 0,
+    deliveryMethod: '', shippingCarrier: '', trackingCode: '', commission: 0, printRequest: '',
   });
 
   const submit = (data) => {
@@ -866,7 +1009,13 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
                   <div style={{ fontWeight: 700, fontSize: 14.5 }}>{customerMap[o.customerId]?.name || '(Khách lẻ)'}</div>
                   <div style={{ fontSize: 12, color: '#8A8574' }}>
                     Đặt: {o.orderDate}{o.deliveryDate ? ` · Giao: ${o.deliveryDate}` : ''}
+                    {o.deliveryMethod ? ` · ${o.deliveryMethod}` : ''}
                   </div>
+                  {(o.shippingCarrier || o.trackingCode) && (
+                    <div style={{ fontSize: 11.5, color: '#8A8574' }}>
+                      {o.shippingCarrier}{o.trackingCode ? ` · Mã vận đơn: ${o.trackingCode}` : ''}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <Money value={orderTotal(o)} bold size={14} />
@@ -895,7 +1044,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
                 <div style={{ marginTop: 8, borderTop: '1px solid #EFEBDE', paddingTop: 8, fontSize: 12.5, color: '#6B6759' }}>
                   {o.items.map((it, i) => (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                      <span>{productMap[it.productId]?.name || '(đã xoá)'} × {it.qty}</span>
+                      <span>{it.manual ? it.name : (productMap[it.productId]?.name || '(đã xoá)')} × {it.qty}</span>
                       <span>{fmtVND(it.price * it.qty)}</span>
                     </div>
                   ))}
@@ -905,16 +1054,23 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
                       <span>{fmtVND(o.shippingFee)}</span>
                     </div>
                   )}
+                  {Number(o.commission) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                      <span>Hoa hồng</span>
+                      <span>-{fmtVND(o.commission)}</span>
+                    </div>
+                  )}
                 </div>
               )}
-              {o.note && <div style={{ marginTop: 6, fontSize: 12, color: '#B8763B' }}>{o.note}</div>}
+              {o.printRequest && <div style={{ marginTop: 6, fontSize: 12, color: '#6B6759' }}>In: {o.printRequest}</div>}
+              {o.note && <div style={{ marginTop: 4, fontSize: 12, color: '#B8763B' }}>{o.note}</div>}
             </Card>
           ))}
         </div>
       )}
 
       {editing && (
-        <Modal title={orders.some((o) => o.id === editing.id) ? 'Sửa đơn hàng' : 'Tạo đơn hàng'} onClose={() => setEditing(null)} width={600}>
+        <Modal title={orders.some((o) => o.id === editing.id) ? 'Sửa đơn hàng' : 'Tạo đơn hàng'} onClose={() => setEditing(null)} width={640}>
           <OrderForm data={editing} customers={customers} products={products} computeProductCost={computeProductCost} onSubmit={submit} onCancel={() => setEditing(null)} />
         </Modal>
       )}
@@ -926,12 +1082,16 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
   const [form, setForm] = useState(data);
   const itemsTotal = (form.items || []).reduce((s, it) => s + it.price * it.qty, 0);
   const total = itemsTotal + Number(form.shippingFee || 0);
+  const revenue = total - Number(form.commission || 0);
 
-  const addItem = () => {
+  const addProductItem = () => {
     if (products.length === 0) return;
     const p = products[0];
     const { sell } = computeProductCost(p);
-    setForm({ ...form, items: [...(form.items || []), { productId: p.id, qty: 1, price: Math.round(sell) }] });
+    setForm({ ...form, items: [...(form.items || []), { manual: false, productId: p.id, qty: 1, price: Math.round(sell) }] });
+  };
+  const addManualItem = () => {
+    setForm({ ...form, items: [...(form.items || []), { manual: true, name: '', qty: 1, price: 0 }] });
   };
   const updateItem = (idx, field, value) => {
     const rows = [...form.items];
@@ -939,6 +1099,8 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
       const p = products.find((x) => x.id === value);
       const { sell } = computeProductCost(p);
       rows[idx] = { ...rows[idx], productId: value, price: Math.round(sell) };
+    } else if (field === 'name') {
+      rows[idx] = { ...rows[idx], name: value };
     } else {
       rows[idx] = { ...rows[idx], [field]: Number(value) };
     }
@@ -978,24 +1140,45 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
         </div>
       </div>
 
-      <Field label="Sản phẩm trong đơn">
-        {products.length === 0 ? (
-          <div style={{ fontSize: 13, color: '#8A8574' }}>Chưa có sản phẩm — thêm ở tab "Sản phẩm" trước.</div>
-        ) : (
-          <>
-            {(form.items || []).map((it, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
-                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
-                <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
-                <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
-              </div>
-            ))}
-            <Btn onClick={addItem}><Plus size={13} /> Thêm sản phẩm</Btn>
-          </>
-        )}
+      <Field label="Sản phẩm / nội dung trong đơn">
+        {(form.items || []).map((it, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+            {it.manual ? (
+              <input style={{ ...inputStyle, flex: 2 }} value={it.name} onChange={(e) => updateItem(idx, 'name', e.target.value)} placeholder="Tên/loại sản phẩm (nhập tay)" />
+            ) : (
+              <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
+                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
+            <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
+            <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {products.length > 0 && <Btn onClick={addProductItem}><Plus size={13} /> Chọn từ sản phẩm</Btn>}
+          <Btn onClick={addManualItem}><Plus size={13} /> Nhập tay</Btn>
+        </div>
+      </Field>
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Hình thức giao hàng">
+            <input style={inputStyle} value={form.deliveryMethod || ''} onChange={(e) => setForm({ ...form, deliveryMethod: e.target.value })} placeholder="Ship COD, tự giao, khách tự lấy..." />
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Đơn vị vận chuyển">
+            <input style={inputStyle} value={form.shippingCarrier || ''} onChange={(e) => setForm({ ...form, shippingCarrier: e.target.value })} placeholder="GHN, GHTK, Ahamove..." />
+          </Field>
+        </div>
+      </div>
+      <Field label="Mã vận đơn">
+        <input style={inputStyle} value={form.trackingCode || ''} onChange={(e) => setForm({ ...form, trackingCode: e.target.value })} />
+      </Field>
+
+      <Field label="Nội dung tag / yêu cầu in">
+        <input style={inputStyle} value={form.printRequest || ''} onChange={(e) => setForm({ ...form, printRequest: e.target.value })} placeholder="Nội dung thiệp, tag cần in..." />
       </Field>
 
       <div style={{ display: 'flex', gap: 10 }}>
@@ -1005,17 +1188,21 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
           </Field>
         </div>
         <div style={{ flex: 1 }}>
-          <Field label="Khách đã cọc (đ)">
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input style={inputStyle} type="number" min="0" value={form.depositAmount || 0} onChange={(e) => setForm({ ...form, depositAmount: Number(e.target.value) })} />
-              <button type="button" onClick={() => setForm({ ...form, depositAmount: Math.round(total / 2) })}
-                style={{ flex: '0 0 auto', fontSize: 12, fontWeight: 700, padding: '0 10px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff', color: '#6B6759', cursor: 'pointer' }}>
-                50%
-              </button>
-            </div>
+          <Field label="Hoa hồng (đ)">
+            <input style={inputStyle} type="number" min="0" value={form.commission || 0} onChange={(e) => setForm({ ...form, commission: Number(e.target.value) })} />
           </Field>
         </div>
       </div>
+
+      <Field label="Khách đã cọc (đ)">
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input style={inputStyle} type="number" min="0" value={form.depositAmount || 0} onChange={(e) => setForm({ ...form, depositAmount: Number(e.target.value) })} />
+          <button type="button" onClick={() => setForm({ ...form, depositAmount: Math.round(total / 2) })}
+            style={{ flex: '0 0 auto', fontSize: 12, fontWeight: 700, padding: '0 10px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff', color: '#6B6759', cursor: 'pointer' }}>
+            50%
+          </button>
+        </div>
+      </Field>
 
       <Field label="Ghi chú">
         <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Yêu cầu riêng, địa điểm giao..." />
@@ -1034,6 +1221,16 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
           <span>Tổng tiền đơn hàng</span>
           <Money value={total} size={15} bold />
         </div>
+        {Number(form.commission || 0) > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#8A8574', marginBottom: 4 }}>
+            <span>Hoa hồng</span><span>-{fmtVND(form.commission)}</span>
+          </div>
+        )}
+        {Number(form.commission || 0) > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, color: '#2F5233', marginBottom: 4 }}>
+            <span>Doanh thu thực nhận</span><span>{fmtVND(revenue)}</span>
+          </div>
+        )}
         {Number(form.depositAmount || 0) > 0 && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#5C7A5E', marginTop: 6 }}>
