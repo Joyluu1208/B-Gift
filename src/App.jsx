@@ -66,6 +66,22 @@ function StatusStamp({ statusKey }) {
   );
 }
 
+function StatusStampPicker({ statusKey, onChange }) {
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }} onClick={(e) => e.stopPropagation()}>
+      <StatusStamp statusKey={statusKey} />
+      <select
+        value={statusKey}
+        onChange={(e) => onChange(e.target.value)}
+        title="Bấm để đổi trạng thái"
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', border: 'none' }}
+      >
+        {STATUS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+      </select>
+    </span>
+  );
+}
+
 function Money({ value, size = 14, bold }) {
   return (
     <span
@@ -1079,7 +1095,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <Money value={orderTotal(o)} bold size={14} />
-                  <StatusStamp statusKey={o.status} />
+                  <StatusStampPicker statusKey={o.status} onChange={(newStatus) => saveOrders(orders.map((x) => (x.id === o.id ? { ...x, status: newStatus } : x)))} />
                   <button onClick={() => setEditing(o)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
                   <button onClick={() => remove(o.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
                 </div>
