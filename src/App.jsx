@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
 import { storage, auth, notify } from './storage.js';
@@ -398,6 +398,20 @@ function AdminApp() {
     const next = customColors.filter((c) => c.key !== key);
     setCustomColors(next); persist('customColors', next);
   };
+  const editCategory = (oldName, newName) => {
+    const trimmed = (newName || '').trim();
+    if (!trimmed || trimmed === oldName) return;
+    const nextCats = customCategories.map((c) => (c === oldName ? trimmed : c));
+    setCustomCategories(nextCats); persist('customCategories', nextCats);
+    const nextProducts = products.map((p) => (p.category === oldName ? { ...p, category: trimmed } : p));
+    setProducts(nextProducts); persist('products', nextProducts);
+  };
+  const editColor = (key, newLabel, newHex) => {
+    const trimmed = (newLabel || '').trim();
+    if (!trimmed) return;
+    const next = customColors.map((c) => (c.key === key ? { ...c, label: trimmed, hex: newHex || c.hex } : c));
+    setCustomColors(next); persist('customColors', next);
+  };
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
@@ -548,7 +562,8 @@ function AdminApp() {
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
               categories={allCategories} colors={allColors} onAddCategory={addCategory} onAddColor={addColor}
-              customCategories={customCategories} customColors={customColors} onRemoveCategory={removeCategory} onRemoveColor={removeColor} />
+              customCategories={customCategories} customColors={customColors} onRemoveCategory={removeCategory} onRemoveColor={removeColor}
+              onEditCategory={editCategory} onEditColor={editColor} />
           )}
           {tab === 'menu' && (
             <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
@@ -789,7 +804,7 @@ function CategoryColorFilter({ category, setCategory, selectedColors, toggleColo
   );
 }
 
-function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor }) {
+function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [filterCategory, setFilterCategory] = useState('');
@@ -802,13 +817,20 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     (!filterCategory || p.category === filterCategory) && (filterColors.length === 0 || filterColors.includes(p.color))
   );
 
-  const move = (id, dir) => {
-    const idx = products.findIndex((p) => p.id === id);
-    const swapIdx = idx + dir;
-    if (idx < 0 || swapIdx < 0 || swapIdx >= products.length) return;
+  const [dragId, setDragId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
+  const handleDrop = (targetId) => {
+    if (!dragId || dragId === targetId) { setDragOverId(null); return; }
     const next = [...products];
-    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+    const fromIdx = next.findIndex((p) => p.id === dragId);
+    const toIdx = next.findIndex((p) => p.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) { setDragOverId(null); return; }
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
     saveProducts(next);
+    setDragId(null);
+    setDragOverId(null);
   };
 
   const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '', description: '' });
@@ -850,10 +872,28 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
             const isOpen = expanded === p.id;
             const colorInfo = colors.find((c) => c.key === p.color);
             return (
-              <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
+              <Card key={p.id} style={{
+                padding: 0, overflow: 'hidden',
+                opacity: dragId === p.id ? 0.4 : 1,
+                border: dragOverId === p.id ? '2px dashed #1E2A38' : undefined,
+              }}
+                onDragOver={(e) => { e.preventDefault(); setDragOverId(p.id); }}
+                onDragLeave={() => setDragOverId((cur) => (cur === p.id ? null : cur))}
+                onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
                   onClick={() => setExpanded(isOpen ? null : p.id)}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      draggable
+                      onDragStart={(e) => { e.stopPropagation(); setDragId(p.id); }}
+                      onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Kéo để đổi vị trí"
+                      style={{ cursor: 'grab', display: 'flex', color: '#B8B3A2' }}
+                    >
+                      <GripVertical size={16} />
+                    </span>
                     {isOpen ? <ChevronUp size={16} color="#8A8574" /> : <ChevronDown size={16} color="#8A8574" />}
                     {p.imageUrl && (
                       <img src={p.imageUrl} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', border: '1px solid #E3DFD3' }} onError={(e) => { e.target.style.display = 'none'; }} />
@@ -867,12 +907,6 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
                       <div style={{ fontSize: 12, color: '#8A8574' }}>Giá vốn <Money value={cost} size={12} /></div>
                     )}
                     <div style={{ fontSize: 12, color: '#8A8574' }}>Giá bán <Money value={sell} size={13} bold /></div>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <button onClick={(e) => { e.stopPropagation(); move(p.id, -1); }} title="Chuyển lên"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 0, lineHeight: 0.7 }}><ChevronUp size={13} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); move(p.id, 1); }} title="Chuyển xuống"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 0, lineHeight: 0.7 }}><ChevronDown size={13} /></button>
-                    </div>
                     <button onClick={(e) => { e.stopPropagation(); setEditing(p); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
                     <button onClick={(e) => { e.stopPropagation(); remove(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
                   </div>
@@ -926,48 +960,101 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
       )}
 
       {managing && (
-        <Modal title="Quản lý loại & màu" onClose={() => setManaging(false)} width={420}>
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 8 }}>Loại sản phẩm bạn đã thêm</div>
-            {customCategories.length === 0 ? (
-              <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có loại nào tự thêm.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {customCategories.map((c) => (
-                  <div key={c} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
-                    <span style={{ fontSize: 13 }}>{c}</span>
-                    <button onClick={() => onRemoveCategory(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+        <ManageCategoriesColorsModal
+          customCategories={customCategories} customColors={customColors}
+          onRemoveCategory={onRemoveCategory} onRemoveColor={onRemoveColor}
+          onEditCategory={onEditCategory} onEditColor={onEditColor}
+          onClose={() => setManaging(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor, onClose }) {
+  const [editingCat, setEditingCat] = useState(null);
+  const [catName, setCatName] = useState('');
+  const [editingColorKey, setEditingColorKey] = useState(null);
+  const [colorName, setColorName] = useState('');
+  const [colorHex, setColorHex] = useState('#9C9585');
+
+  const startEditCat = (c) => { setEditingCat(c); setCatName(c); };
+  const saveEditCat = () => { onEditCategory(editingCat, catName); setEditingCat(null); };
+
+  const startEditColor = (c) => { setEditingColorKey(c.key); setColorName(c.label); setColorHex(c.hex); };
+  const saveEditColor = () => { onEditColor(editingColorKey, colorName, colorHex); setEditingColorKey(null); };
+
+  return (
+    <Modal title="Quản lý loại & màu" onClose={onClose} width={420}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 8 }}>Loại sản phẩm bạn đã thêm</div>
+        {customCategories.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có loại nào tự thêm.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {customCategories.map((c) => (
+              <div key={c} style={{ padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+                {editingCat === c ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input style={{ ...inputStyle, padding: '5px 8px' }} value={catName} autoFocus
+                      onChange={(e) => setCatName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveEditCat(); }} />
+                    <button onClick={saveEditCat} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5C7A5E' }}><Check size={16} /></button>
+                    <button onClick={() => setEditingCat(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8574' }}><X size={16} /></button>
                   </div>
-                ))}
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13 }}>{c}</span>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => startEditCat(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759' }}><Pencil size={13} /></button>
+                      <button onClick={() => onRemoveCategory(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-            <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>Các loại có sẵn (Tháp bánh sinh nhật, Set túi quà sinh nhật, Hoa bánh kẹo) không xoá được.</div>
+            ))}
           </div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 8 }}>Màu sắc bạn đã thêm</div>
-            {customColors.length === 0 ? (
-              <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có màu nào tự thêm.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {customColors.map((c) => (
-                  <div key={c.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+        )}
+        <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>Các loại có sẵn (Tháp bánh sinh nhật, Set túi quà sinh nhật, Hoa bánh kẹo) không sửa/xoá được.</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 8 }}>Màu sắc bạn đã thêm</div>
+        {customColors.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có màu nào tự thêm.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {customColors.map((c) => (
+              <div key={c.key} style={{ padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+                {editingColorKey === c.key ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input type="color" value={colorHex} onChange={(e) => setColorHex(e.target.value)}
+                      style={{ width: 34, height: 32, padding: 2, border: '1px solid #D7D2C2', borderRadius: 6, flex: '0 0 auto', cursor: 'pointer' }} />
+                    <input style={{ ...inputStyle, padding: '5px 8px' }} value={colorName} autoFocus
+                      onChange={(e) => setColorName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveEditColor(); }} />
+                    <button onClick={saveEditColor} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5C7A5E' }}><Check size={16} /></button>
+                    <button onClick={() => setEditingColorKey(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8574' }}><X size={16} /></button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                       <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
                       {c.label}
                     </span>
-                    <button onClick={() => onRemoveColor(c.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => startEditColor(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759' }}><Pencil size={13} /></button>
+                      <button onClick={() => onRemoveColor(c.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={13} /></button>
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
-            )}
-            <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>Các màu có sẵn (Hồng, Xanh Lá, Tím, Xanh Dương, Đỏ, Vàng Nâu, Khác) không xoá được.</div>
+            ))}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-            <Btn onClick={() => setManaging(false)}>Đóng</Btn>
-          </div>
-        </Modal>
-      )}
-    </div>
+        )}
+        <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>Các màu có sẵn (Hồng, Xanh Lá, Tím, Xanh Dương, Đỏ, Vàng Nâu, Khác) không sửa/xoá được.</div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+        <Btn onClick={onClose}>Đóng</Btn>
+      </div>
+    </Modal>
   );
 }
 
