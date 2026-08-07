@@ -113,7 +113,7 @@ function Money({ value, size = 14, bold }) {
   );
 }
 
-function Card({ children, style }) {
+function Card({ children, style, ...rest }) {
   return (
     <div
       style={{
@@ -122,6 +122,7 @@ function Card({ children, style }) {
         borderRadius: 10,
         ...style,
       }}
+      {...rest}
     >
       {children}
     </div>
