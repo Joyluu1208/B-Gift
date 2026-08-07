@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
-import { storage } from './storage.js';
+import { storage, auth } from './storage.js';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -233,6 +233,44 @@ async function saveKey(key, data) {
   }
 }
 
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    const { error } = await auth.signIn(email, password);
+    setLoading(false);
+    if (error) setError('Sai email hoặc mật khẩu.');
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#F2EFE6', fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', padding: 16,
+    }}>
+      <form onSubmit={submit} style={{ background: '#fff', padding: 28, borderRadius: 12, border: '1px solid #E3DFD3', width: '100%', maxWidth: 320 }}>
+        <h2 style={{ margin: '0 0 2px', fontFamily: 'Georgia, "Times New Roman", serif', color: '#1E2A38', fontSize: 22 }}>Bơ Gift Biên Hòa</h2>
+        <p style={{ margin: '0 0 18px', fontSize: 12.5, color: '#8A8574' }}>Đăng nhập để vào trang quản lý</p>
+        <Field label="Email">
+          <input style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+        </Field>
+        <Field label="Mật khẩu">
+          <input style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </Field>
+        {error && <div style={{ color: '#A8493F', fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <Btn variant="primary" type="submit" disabled={loading} style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}>
+          {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+        </Btn>
+      </form>
+    </div>
+  );
+}
+
 function computeProductCostFor(prod, materialMap) {
   if (prod.manualPrice) {
     const sell = Number(prod.manualSellPrice || 0);
@@ -299,6 +337,7 @@ function PublicMenuApp() {
 
 function AdminApp() {
   const [ready, setReady] = useState(false);
+  const [session, setSession] = useState(undefined);
   const [tab, setTab] = useState('dashboard');
   const [materials, setMaterials] = useState([]);
   const [products, setProducts] = useState([]);
@@ -308,6 +347,14 @@ function AdminApp() {
   const [customColors, setCustomColors] = useState([]);
 
   useEffect(() => {
+    auth.getSession().then(setSession);
+    const sub = auth.onAuthChange((s) => setSession(s));
+    return () => sub.unsubscribe && sub.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (session === undefined) return;
+    if (!session) { setReady(true); return; }
     (async () => {
       const [m, p, c, o, cc, cl] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
@@ -317,7 +364,7 @@ function AdminApp() {
       setCustomCategories(cc); setCustomColors(cl);
       setReady(true);
     })();
-  }, []);
+  }, [session]);
 
   const persist = async (key, data) => {
     const ok = await saveKey(key, data);
@@ -437,6 +484,10 @@ function AdminApp() {
     );
   }
 
+  if (!session) {
+    return <LoginScreen />;
+  }
+
   return (
     <div style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', background: '#F2EFE6', minHeight: '100vh', color: '#232019' }}>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 16px' }}>
@@ -452,7 +503,11 @@ function AdminApp() {
               Bơ Gift Biên Hòa
             </span>
           </div>
-          <Btn onClick={exportExcel}><Download size={14} /> Xuất Excel</Btn>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#8A8574' }}>{session.user?.email}</span>
+            <Btn onClick={exportExcel}><Download size={14} /> Xuất Excel</Btn>
+            <Btn onClick={() => auth.signOut()}>Đăng xuất</Btn>
+          </div>
         </header>
 
         <nav style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E3DFD3', marginBottom: 20, overflowX: 'auto' }}>
@@ -1094,6 +1149,7 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
   const [filterCategory, setFilterCategory] = useState('');
   const [filterColor, setFilterColor] = useState('');
   const [preview, setPreview] = useState(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) &&
     (!filterCategory || p.category === filterCategory) &&
@@ -1154,11 +1210,23 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
         const { sell } = computeProductCost(preview);
         const colorInfo = colors.find((c) => c.key === preview.color);
         return (
-          <Modal title={preview.name} onClose={() => setPreview(null)} width={480}>
+          <Modal title={preview.name} onClose={() => { setPreview(null); setFullscreen(false); }} width={480}>
             <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#EFEBDE', marginBottom: 14, aspectRatio: '1 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {preview.imageUrl ? (
                 <>
-                  <img src={preview.imageUrl} alt={preview.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img src={preview.imageUrl} alt={preview.name} onClick={() => setFullscreen(true)}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }} />
+                  <button
+                    onClick={() => setFullscreen(true)}
+                    title="Xem toàn màn hình"
+                    style={{
+                      position: 'absolute', bottom: 10, left: 10, display: 'flex', alignItems: 'center', gap: 6,
+                      background: 'rgba(30,42,56,0.85)', color: '#fff', border: 'none', borderRadius: 6,
+                      padding: '7px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    <Search size={14} /> Phóng to
+                  </button>
                   <button
                     onClick={() => downloadImage(preview.imageUrl, `${preview.name || 'san-pham'}.jpg`)}
                     title="Tải ảnh về máy"
@@ -1191,6 +1259,39 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
           </Modal>
         );
       })()}
+
+      {fullscreen && preview?.imageUrl && (
+        <div
+          onClick={() => setFullscreen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(10,10,8,0.92)', zIndex: 100,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, cursor: 'zoom-out',
+          }}
+        >
+          <img src={preview.imageUrl} alt={preview.name}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
+          <button
+            onClick={(e) => { e.stopPropagation(); setFullscreen(false); }}
+            style={{
+              position: 'absolute', top: 18, right: 18, background: 'rgba(255,255,255,0.15)', color: '#fff',
+              border: 'none', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', cursor: 'pointer',
+            }}
+          >
+            <X size={20} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); downloadImage(preview.imageUrl, `${preview.name || 'san-pham'}.jpg`); }}
+            style={{
+              position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', color: '#fff',
+              border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            <Download size={15} /> Tải ảnh về
+          </button>
+        </div>
+      )}
     </div>
   );
 }
