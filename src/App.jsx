@@ -224,8 +224,13 @@ async function loadKey(key) {
 }
 
 async function saveKey(key, data) {
-  try { await storage.set(key, JSON.stringify(data)); }
-  catch (e) { console.error('Lỗi lưu dữ liệu', key, e); }
+  try {
+    await storage.set(key, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    console.error('Lỗi lưu dữ liệu', key, e);
+    return false;
+  }
 }
 
 function computeProductCostFor(prod, materialMap) {
@@ -304,7 +309,12 @@ function AdminApp() {
     })();
   }, []);
 
-  const persist = (key, data) => { saveKey(key, data); };
+  const persist = async (key, data) => {
+    const ok = await saveKey(key, data);
+    if (!ok) {
+      window.alert('⚠️ Lưu KHÔNG thành công (mất mạng hoặc lỗi máy chủ). Vui lòng kiểm tra kết nối mạng và làm lại thao tác vừa rồi, nếu không dữ liệu sẽ không được lưu.');
+    }
+  };
 
   const saveMaterials = (d) => { setMaterials(d); persist('materials', d); };
   const saveProducts = (d) => { setProducts(d); persist('products', d); };
@@ -695,7 +705,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
     (!filterCategory || p.category === filterCategory) && (!filterColor || p.color === filterColor)
   );
 
-  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '', description: '' });
 
   const submit = (data) => {
     const exists = products.some((p) => p.id === data.id);
@@ -754,6 +764,9 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
                 </div>
                 {isOpen && (
                   <div style={{ borderTop: '1px solid #EFEBDE', padding: '12px 16px', fontSize: 13 }}>
+                    {p.description && (
+                      <p style={{ color: '#4A4638', marginBottom: 10, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{p.description}</p>
+                    )}
                     {p.manualPrice ? (
                       <div style={{ color: '#8A8574' }}>Giá nhập tay, chưa tính theo vật liệu.</div>
                     ) : (
@@ -810,10 +823,10 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
     if (!file) return;
     setUploading(true);
     try {
-      const dataUrl = await fileToCompressedDataUrl(file);
-      setForm((f) => ({ ...f, imageUrl: dataUrl }));
+      const url = await storage.uploadImage(file);
+      setForm((f) => ({ ...f, imageUrl: url }));
     } catch (err) {
-      console.error('Lỗi xử lý ảnh', err);
+      console.error('Lỗi tải ảnh lên', err);
     } finally {
       setUploading(false);
     }
@@ -885,6 +898,12 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
             )}
           </div>
         </div>
+      </Field>
+
+      <Field label="Mô tả sản phẩm (thành phần, quy cách...)">
+        <textarea style={{ ...inputStyle, minHeight: 64, resize: 'vertical', fontFamily: 'inherit' }}
+          value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="VD: Gồm bánh kem vani, sữa tươi, hoa hồng giấy, hộp quà 20x20cm..." />
       </Field>
 
       <div style={{
@@ -974,10 +993,28 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
   );
 }
 
+async function downloadImage(url, filename) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename || 'anh-san-pham.jpg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (e) {
+    window.open(url, '_blank');
+  }
+}
+
 function MenuTab({ products, computeProductCost }) {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterColor, setFilterColor] = useState('');
+  const [preview, setPreview] = useState(null);
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) &&
     (!filterCategory || p.category === filterCategory) &&
@@ -1007,9 +1044,9 @@ function MenuTab({ products, computeProductCost }) {
             const { sell } = computeProductCost(p);
             const colorInfo = PRODUCT_COLORS.find((c) => c.key === p.color);
             return (
-              <div key={p.id} style={{
+              <div key={p.id} onClick={() => setPreview(p)} style={{
                 background: '#FFFFFF', borderRadius: 12, border: '1px solid #E3DFD3', overflow: 'hidden',
-                display: 'flex', flexDirection: 'column',
+                display: 'flex', flexDirection: 'column', cursor: 'pointer',
               }}>
                 <div style={{ aspectRatio: '1 / 1', background: '#EFEBDE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {p.imageUrl ? (
@@ -1033,6 +1070,48 @@ function MenuTab({ products, computeProductCost }) {
           })}
         </div>
       )}
+
+      {preview && (() => {
+        const { sell } = computeProductCost(preview);
+        const colorInfo = PRODUCT_COLORS.find((c) => c.key === preview.color);
+        return (
+          <Modal title={preview.name} onClose={() => setPreview(null)} width={480}>
+            <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#EFEBDE', marginBottom: 14, aspectRatio: '1 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {preview.imageUrl ? (
+                <>
+                  <img src={preview.imageUrl} alt={preview.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <button
+                    onClick={() => downloadImage(preview.imageUrl, `${preview.name || 'san-pham'}.jpg`)}
+                    title="Tải ảnh về máy"
+                    style={{
+                      position: 'absolute', bottom: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6,
+                      background: 'rgba(30,42,56,0.85)', color: '#fff', border: 'none', borderRadius: 6,
+                      padding: '7px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    <Download size={14} /> Tải ảnh về
+                  </button>
+                </>
+              ) : (
+                <ImageIcon size={40} color="#C7C2AE" />
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              {colorInfo && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#6B6759' }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: colorInfo.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
+                  {colorInfo.label}
+                </span>
+              )}
+              {preview.category && <span style={{ fontSize: 12, color: '#8A8574', border: '1px solid #E3DFD3', borderRadius: 4, padding: '1px 7px' }}>{preview.category}</span>}
+            </div>
+            {preview.description && (
+              <p style={{ fontSize: 13.5, color: '#4A4638', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 12 }}>{preview.description}</p>
+            )}
+            <Money value={sell} size={18} bold />
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
