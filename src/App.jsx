@@ -251,17 +251,23 @@ function PublicMenuApp() {
   const [ready, setReady] = useState(false);
   const [materials, setMaterials] = useState([]);
   const [products, setProducts] = useState([]);
+  const [customCategories, setCustomCategories] = useState([]);
+  const [customColors, setCustomColors] = useState([]);
 
   useEffect(() => {
     (async () => {
-      const [m, p] = await Promise.all([loadKey('materials'), loadKey('products')]);
-      setMaterials(m); setProducts(p);
+      const [m, p, cc, cl] = await Promise.all([
+        loadKey('materials'), loadKey('products'), loadKey('customCategories'), loadKey('customColors'),
+      ]);
+      setMaterials(m); setProducts(p); setCustomCategories(cc); setCustomColors(cl);
       setReady(true);
     })();
   }, []);
 
   const materialMap = useMemo(() => Object.fromEntries(materials.map((m) => [m.id, m])), [materials]);
   const computeProductCost = (prod) => computeProductCostFor(prod, materialMap);
+  const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
+  const allColors = [...PRODUCT_COLORS, ...customColors];
 
   if (!ready) {
     return (
@@ -284,7 +290,7 @@ function PublicMenuApp() {
           <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>Bảng giá sản phẩm</span>
         </header>
         <main style={{ paddingTop: 20, paddingBottom: 60 }}>
-          <MenuTab products={products} computeProductCost={computeProductCost} />
+          <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
         </main>
       </div>
     </div>
@@ -298,13 +304,17 @@ function AdminApp() {
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [customCategories, setCustomCategories] = useState([]);
+  const [customColors, setCustomColors] = useState([]);
 
   useEffect(() => {
     (async () => {
-      const [m, p, c, o] = await Promise.all([
+      const [m, p, c, o, cc, cl] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
+        loadKey('customCategories'), loadKey('customColors'),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
+      setCustomCategories(cc); setCustomColors(cl);
       setReady(true);
     })();
   }, []);
@@ -319,6 +329,22 @@ function AdminApp() {
   const saveMaterials = (d) => { setMaterials(d); persist('materials', d); };
   const saveProducts = (d) => { setProducts(d); persist('products', d); };
   const saveCustomers = (d) => { setCustomers(d); persist('customers', d); };
+  const addCategory = (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed || PRODUCT_CATEGORIES.includes(trimmed) || customCategories.includes(trimmed)) return;
+    const next = [...customCategories, trimmed];
+    setCustomCategories(next); persist('customCategories', next);
+  };
+  const addColor = (label, hex) => {
+    const trimmed = (label || '').trim();
+    if (!trimmed) return;
+    const key = 'c_' + trimmed.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '') + '_' + uid().slice(-4);
+    const next = [...customColors, { key, label: trimmed, hex: hex || '#9C9585' }];
+    setCustomColors(next); persist('customColors', next);
+    return key;
+  };
+  const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
+  const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
 
   const materialMap = useMemo(() => Object.fromEntries(materials.map((m) => [m.id, m])), [materials]);
@@ -456,10 +482,11 @@ function AdminApp() {
             <MaterialsTab materials={materials} saveMaterials={saveMaterials} />
           )}
           {tab === 'products' && (
-            <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost} />
+            <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
+              categories={allCategories} colors={allColors} onAddCategory={addCategory} onAddColor={addColor} />
           )}
           {tab === 'menu' && (
-            <MenuTab products={products} computeProductCost={computeProductCost} />
+            <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
           )}
           {tab === 'customers' && (
             <CustomersTab customers={customers} saveCustomers={saveCustomers} orders={orders} />
@@ -674,18 +701,18 @@ function filterPillStyle(active, accent) {
   };
 }
 
-function CategoryColorFilter({ category, setCategory, color, setColor }) {
+function CategoryColorFilter({ category, setCategory, color, setColor, categories, colors }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         <button onClick={() => setCategory('')} style={filterPillStyle(category === '')}>Tất cả loại</button>
-        {PRODUCT_CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <button key={c} onClick={() => setCategory(c)} style={filterPillStyle(category === c)}>{c}</button>
         ))}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button onClick={() => setColor('')} style={filterPillStyle(color === '')}>Tất cả màu</button>
-        {PRODUCT_COLORS.map((c) => (
+        {colors.map((c) => (
           <button key={c.key} onClick={() => setColor(c.key)} style={filterPillStyle(color === c.key, c.hex)}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
             {c.label}
@@ -696,7 +723,7 @@ function CategoryColorFilter({ category, setCategory, color, setColor }) {
   );
 }
 
-function ProductsTab({ products, saveProducts, materials, computeProductCost }) {
+function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [filterCategory, setFilterCategory] = useState('');
@@ -723,7 +750,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
       </div>
 
       {products.length > 0 && (
-        <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} />
+        <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} categories={categories} colors={colors} />
       )}
 
       {filtered.length === 0 ? (
@@ -739,7 +766,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
           {filtered.map((p) => {
             const { cost, sell } = computeProductCost(p);
             const isOpen = expanded === p.id;
-            const colorInfo = PRODUCT_COLORS.find((c) => c.key === p.color);
+            const colorInfo = colors.find((c) => c.key === p.color);
             return (
               <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
@@ -805,17 +832,41 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
 
       {editing && (
         <Modal title={products.some((p) => p.id === editing.id) ? 'Sửa sản phẩm' : 'Thêm sản phẩm'} onClose={() => setEditing(null)} width={560}>
-          <ProductForm data={editing} materials={materials} onSubmit={submit} onCancel={() => setEditing(null)} computeProductCost={computeProductCost} />
+          <ProductForm data={editing} materials={materials} onSubmit={submit} onCancel={() => setEditing(null)} computeProductCost={computeProductCost}
+            categories={categories} colors={colors} onAddCategory={onAddCategory} onAddColor={onAddColor} />
         </Modal>
       )}
     </div>
   );
 }
 
-function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }) {
+function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, categories, colors, onAddCategory, onAddColor }) {
   const [form, setForm] = useState(data);
   const [uploading, setUploading] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [addingColor, setAddingColor] = useState(false);
+  const [newColorName, setNewColorName] = useState('');
+  const [newColorHex, setNewColorHex] = useState('#9C9585');
   const { cost, sell } = computeProductCost(form);
+
+  const confirmNewCategory = () => {
+    const name = newCategoryName.trim();
+    if (!name) { setAddingCategory(false); return; }
+    onAddCategory(name);
+    setForm({ ...form, category: name });
+    setAddingCategory(false);
+    setNewCategoryName('');
+  };
+
+  const confirmNewColor = () => {
+    const name = newColorName.trim();
+    if (!name) { setAddingColor(false); return; }
+    const key = onAddColor(name, newColorHex);
+    setForm({ ...form, color: key });
+    setAddingColor(false);
+    setNewColorName('');
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files[0];
@@ -852,18 +903,46 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <Field label="Loại sản phẩm">
-            <select style={inputStyle} value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-              <option value="">— Chọn loại —</option>
-              {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            {addingCategory ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={inputStyle} autoFocus value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Tên loại mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewCategory(); } }} />
+                <Btn type="button" variant="primary" onClick={confirmNewCategory} style={{ flex: '0 0 auto' }}>OK</Btn>
+                <Btn type="button" onClick={() => setAddingCategory(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+              </div>
+            ) : (
+              <select style={inputStyle} value={form.category || ''} onChange={(e) => {
+                if (e.target.value === '__new__') { setAddingCategory(true); return; }
+                setForm({ ...form, category: e.target.value });
+              }}>
+                <option value="">— Chọn loại —</option>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__new__">+ Thêm loại mới...</option>
+              </select>
+            )}
           </Field>
         </div>
         <div style={{ flex: 1 }}>
           <Field label="Màu sắc">
-            <select style={inputStyle} value={form.color || ''} onChange={(e) => setForm({ ...form, color: e.target.value })}>
-              <option value="">— Chọn màu —</option>
-              {PRODUCT_COLORS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </select>
+            {addingColor ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="color" value={newColorHex} onChange={(e) => setNewColorHex(e.target.value)}
+                  style={{ width: 40, height: 38, padding: 2, border: '1px solid #D7D2C2', borderRadius: 6, flex: '0 0 auto', cursor: 'pointer' }} />
+                <input style={inputStyle} autoFocus value={newColorName} onChange={(e) => setNewColorName(e.target.value)}
+                  placeholder="Tên màu mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewColor(); } }} />
+                <Btn type="button" variant="primary" onClick={confirmNewColor} style={{ flex: '0 0 auto' }}>OK</Btn>
+                <Btn type="button" onClick={() => setAddingColor(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+              </div>
+            ) : (
+              <select style={inputStyle} value={form.color || ''} onChange={(e) => {
+                if (e.target.value === '__new__') { setAddingColor(true); return; }
+                setForm({ ...form, color: e.target.value });
+              }}>
+                <option value="">— Chọn màu —</option>
+                {colors.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                <option value="__new__">+ Thêm màu mới...</option>
+              </select>
+            )}
           </Field>
         </div>
       </div>
@@ -1010,7 +1089,7 @@ async function downloadImage(url, filename) {
   }
 }
 
-function MenuTab({ products, computeProductCost }) {
+function MenuTab({ products, computeProductCost, categories, colors }) {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterColor, setFilterColor] = useState('');
@@ -1035,14 +1114,14 @@ function MenuTab({ products, computeProductCost }) {
         <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
         <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
-      <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} />
+      <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} categories={categories} colors={colors} />
       {filtered.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>Không có sản phẩm nào khớp bộ lọc.</Card>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
           {filtered.map((p) => {
             const { sell } = computeProductCost(p);
-            const colorInfo = PRODUCT_COLORS.find((c) => c.key === p.color);
+            const colorInfo = colors.find((c) => c.key === p.color);
             return (
               <div key={p.id} onClick={() => setPreview(p)} style={{
                 background: '#FFFFFF', borderRadius: 12, border: '1px solid #E3DFD3', overflow: 'hidden',
@@ -1073,7 +1152,7 @@ function MenuTab({ products, computeProductCost }) {
 
       {preview && (() => {
         const { sell } = computeProductCost(preview);
-        const colorInfo = PRODUCT_COLORS.find((c) => c.key === preview.color);
+        const colorInfo = colors.find((c) => c.key === preview.color);
         return (
           <Modal title={preview.name} onClose={() => setPreview(null)} width={480}>
             <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#EFEBDE', marginBottom: 14, aspectRatio: '1 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
