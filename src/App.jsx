@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
-import { storage, auth } from './storage.js';
+import { storage, auth, notify } from './storage.js';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -1144,17 +1144,25 @@ async function downloadImage(url, filename) {
   }
 }
 
+const MENU_PAGE_SIZE = 25;
+
 function MenuTab({ products, computeProductCost, categories, colors }) {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterColor, setFilterColor] = useState('');
   const [preview, setPreview] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [page, setPage] = useState(1);
   const filtered = products.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) &&
     (!filterCategory || p.category === filterCategory) &&
     (!filterColor || p.color === filterColor)
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / MENU_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered.slice((currentPage - 1) * MENU_PAGE_SIZE, currentPage * MENU_PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [search, filterCategory, filterColor]);
 
   if (products.length === 0) {
     return (
@@ -1174,8 +1182,12 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
       {filtered.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>Không có sản phẩm nào khớp bộ lọc.</Card>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
-          {filtered.map((p) => {
+        <>
+          <div style={{ fontSize: 12.5, color: '#8A8574', marginBottom: 10 }}>
+            {filtered.length} sản phẩm{totalPages > 1 ? ` · Trang ${currentPage}/${totalPages}` : ''}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+            {paged.map((p) => {
             const { sell } = computeProductCost(p);
             const colorInfo = colors.find((c) => c.key === p.color);
             return (
@@ -1202,8 +1214,17 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
                 </div>
               </div>
             );
-          })}
-        </div>
+            })}
+          </div>
+
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 24 }}>
+              <Btn onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>« Trước</Btn>
+              <span style={{ fontSize: 13, color: '#6B6759', fontWeight: 600 }}>Trang {currentPage} / {totalPages}</span>
+              <Btn onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>Sau »</Btn>
+            </div>
+          )}
+        </>
       )}
 
       {preview && (() => {
@@ -1454,6 +1475,14 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
     const exists = orders.some((o) => o.id === data.id);
     const next = exists ? orders.map((o) => (o.id === data.id ? data : o)) : [...orders, data];
     saveOrders(next);
+    if (!exists) {
+      notify.newOrder({
+        customerName: customerMap[data.customerId]?.name || data.customerName || '(Khách lẻ)',
+        orderDate: data.orderDate,
+        total: fmtVND(orderTotal(data)),
+        items: (data.items || []).map((it) => (it.manual ? it.name : (productMap[it.productId]?.name || ''))),
+      });
+    }
     setEditing(null);
   };
 
