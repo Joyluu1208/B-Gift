@@ -390,6 +390,14 @@ function AdminApp() {
     setCustomColors(next); persist('customColors', next);
     return key;
   };
+  const removeCategory = (name) => {
+    const next = customCategories.filter((c) => c !== name);
+    setCustomCategories(next); persist('customCategories', next);
+  };
+  const removeColor = (key) => {
+    const next = customColors.filter((c) => c.key !== key);
+    setCustomColors(next); persist('customColors', next);
+  };
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
@@ -447,13 +455,14 @@ function AdminApp() {
 
     const orderSheet = orders.map((o) => {
       const custName = customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)';
+      const custSource = customerMap[o.customerId]?.source || o.source || '';
       const itemsText = (o.items || [])
         .map((it) => `${it.manual ? it.name : (productMap[it.productId]?.name || '(đã xoá)')} x${it.qty}`)
         .join('; ');
       const total = orderTotal(o);
       const remain = total - Number(o.depositAmount || 0);
       return {
-        'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName,
+        'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName, 'Nguồn': custSource,
         'Trạng thái': STATUS.find((s) => s.key === o.status)?.label || o.status,
         'Sản phẩm': itemsText, 'Tổng tiền': total, 'Phí ship': Number(o.shippingFee || 0),
         'Hoa hồng': Number(o.commission || 0), 'Đã cọc': Number(o.depositAmount || 0),
@@ -538,7 +547,8 @@ function AdminApp() {
           )}
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
-              categories={allCategories} colors={allColors} onAddCategory={addCategory} onAddColor={addColor} />
+              categories={allCategories} colors={allColors} onAddCategory={addCategory} onAddColor={addColor}
+              customCategories={customCategories} customColors={customColors} onRemoveCategory={removeCategory} onRemoveColor={removeColor} />
           )}
           {tab === 'menu' && (
             <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
@@ -756,7 +766,7 @@ function filterPillStyle(active, accent) {
   };
 }
 
-function CategoryColorFilter({ category, setCategory, color, setColor, categories, colors }) {
+function CategoryColorFilter({ category, setCategory, selectedColors, toggleColor, categories, colors }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -766,26 +776,40 @@ function CategoryColorFilter({ category, setCategory, color, setColor, categorie
         ))}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button onClick={() => setColor('')} style={filterPillStyle(color === '')}>Tất cả màu</button>
+        <button onClick={() => toggleColor(null)} style={filterPillStyle(selectedColors.length === 0)}>Tất cả màu</button>
         {colors.map((c) => (
-          <button key={c.key} onClick={() => setColor(c.key)} style={filterPillStyle(color === c.key, c.hex)}>
+          <button key={c.key} onClick={() => toggleColor(c.key)} style={filterPillStyle(selectedColors.includes(c.key), c.hex)}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
             {c.label}
           </button>
         ))}
+        <span style={{ fontSize: 11, color: '#8A8574', alignSelf: 'center' }}>(chọn được nhiều màu)</span>
       </div>
     </div>
   );
 }
 
-function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor }) {
+function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [filterCategory, setFilterCategory] = useState('');
-  const [filterColor, setFilterColor] = useState('');
+  const [filterColors, setFilterColors] = useState([]);
+  const toggleFilterColor = (key) => {
+    if (key === null) { setFilterColors([]); return; }
+    setFilterColors((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
   const filtered = products.filter((p) =>
-    (!filterCategory || p.category === filterCategory) && (!filterColor || p.color === filterColor)
+    (!filterCategory || p.category === filterCategory) && (filterColors.length === 0 || filterColors.includes(p.color))
   );
+
+  const move = (id, dir) => {
+    const idx = products.findIndex((p) => p.id === id);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= products.length) return;
+    const next = [...products];
+    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+    saveProducts(next);
+  };
 
   const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '', description: '' });
 
@@ -798,14 +822,17 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
 
   const remove = (id) => saveProducts(products.filter((p) => p.id !== id));
 
+  const [managing, setManaging] = useState(false);
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 14 }}>
+        <Btn onClick={() => setManaging(true)}>Quản lý loại &amp; màu</Btn>
         <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
       </div>
 
       {products.length > 0 && (
-        <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} categories={categories} colors={colors} />
+        <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} selectedColors={filterColors} toggleColor={toggleFilterColor} categories={categories} colors={colors} />
       )}
 
       {filtered.length === 0 ? (
@@ -835,11 +862,17 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
                     {colorInfo && <span style={{ width: 10, height: 10, borderRadius: '50%', background: colorInfo.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} title={colorInfo.label} />}
                     {p.category && <span style={{ fontSize: 11, color: '#8A8574', border: '1px solid #E3DFD3', borderRadius: 4, padding: '1px 6px' }}>{p.category}</span>}
                   </div>
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     {!p.manualPrice && (
                       <div style={{ fontSize: 12, color: '#8A8574' }}>Giá vốn <Money value={cost} size={12} /></div>
                     )}
                     <div style={{ fontSize: 12, color: '#8A8574' }}>Giá bán <Money value={sell} size={13} bold /></div>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <button onClick={(e) => { e.stopPropagation(); move(p.id, -1); }} title="Chuyển lên"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 0, lineHeight: 0.7 }}><ChevronUp size={13} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); move(p.id, 1); }} title="Chuyển xuống"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 0, lineHeight: 0.7 }}><ChevronDown size={13} /></button>
+                    </div>
                     <button onClick={(e) => { e.stopPropagation(); setEditing(p); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
                     <button onClick={(e) => { e.stopPropagation(); remove(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
                   </div>
@@ -889,6 +922,49 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
         <Modal title={products.some((p) => p.id === editing.id) ? 'Sửa sản phẩm' : 'Thêm sản phẩm'} onClose={() => setEditing(null)} width={560}>
           <ProductForm data={editing} materials={materials} onSubmit={submit} onCancel={() => setEditing(null)} computeProductCost={computeProductCost}
             categories={categories} colors={colors} onAddCategory={onAddCategory} onAddColor={onAddColor} />
+        </Modal>
+      )}
+
+      {managing && (
+        <Modal title="Quản lý loại & màu" onClose={() => setManaging(false)} width={420}>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 8 }}>Loại sản phẩm bạn đã thêm</div>
+            {customCategories.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có loại nào tự thêm.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {customCategories.map((c) => (
+                  <div key={c} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+                    <span style={{ fontSize: 13 }}>{c}</span>
+                    <button onClick={() => onRemoveCategory(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>Các loại có sẵn (Tháp bánh sinh nhật, Set túi quà sinh nhật, Hoa bánh kẹo) không xoá được.</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 8 }}>Màu sắc bạn đã thêm</div>
+            {customColors.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có màu nào tự thêm.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {customColors.map((c) => (
+                  <div key={c.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
+                      {c.label}
+                    </span>
+                    <button onClick={() => onRemoveColor(c.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>Các màu có sẵn (Hồng, Xanh Lá, Tím, Xanh Dương, Đỏ, Vàng Nâu, Khác) không xoá được.</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+            <Btn onClick={() => setManaging(false)}>Đóng</Btn>
+          </div>
         </Modal>
       )}
     </div>
@@ -1149,20 +1225,30 @@ const MENU_PAGE_SIZE = 25;
 function MenuTab({ products, computeProductCost, categories, colors }) {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
-  const [filterColor, setFilterColor] = useState('');
+  const [filterColors, setFilterColors] = useState([]);
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
   const [preview, setPreview] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [page, setPage] = useState(1);
-  const filtered = products.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) &&
-    (!filterCategory || p.category === filterCategory) &&
-    (!filterColor || p.color === filterColor)
-  );
+  const toggleFilterColor = (key) => {
+    if (key === null) { setFilterColors([]); return; }
+    setFilterColors((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
+  const filtered = products.filter((p) => {
+    const { sell } = computeProductCost(p);
+    if (!p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterCategory && p.category !== filterCategory) return false;
+    if (filterColors.length > 0 && !filterColors.includes(p.color)) return false;
+    if (minPrice !== '' && sell < Number(minPrice)) return false;
+    if (maxPrice !== '' && sell > Number(maxPrice)) return false;
+    return true;
+  });
   const totalPages = Math.max(1, Math.ceil(filtered.length / MENU_PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const paged = filtered.slice((currentPage - 1) * MENU_PAGE_SIZE, currentPage * MENU_PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, filterCategory, filterColor]);
+  useEffect(() => { setPage(1); }, [search, filterCategory, filterColors, minPrice, maxPrice]);
 
   if (products.length === 0) {
     return (
@@ -1178,7 +1264,19 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
         <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
         <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
-      <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} categories={categories} colors={colors} />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12.5, color: '#6B6759', fontWeight: 600 }}>Khoảng giá:</span>
+        <input type="number" min="0" placeholder="Từ (đ)" value={minPrice} onChange={(e) => setMinPrice(e.target.value)}
+          style={{ ...inputStyle, width: 110, padding: '6px 10px' }} />
+        <span style={{ color: '#8A8574' }}>—</span>
+        <input type="number" min="0" placeholder="Đến (đ)" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)}
+          style={{ ...inputStyle, width: 110, padding: '6px 10px' }} />
+        {(minPrice !== '' || maxPrice !== '') && (
+          <button onClick={() => { setMinPrice(''); setMaxPrice(''); }}
+            style={{ fontSize: 12, color: '#A8493F', background: 'none', border: 'none', cursor: 'pointer' }}>Xoá khoảng giá</button>
+        )}
+      </div>
+      <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} selectedColors={filterColors} toggleColor={toggleFilterColor} categories={categories} colors={colors} />
       {filtered.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>Không có sản phẩm nào khớp bộ lọc.</Card>
       ) : (
@@ -1466,7 +1564,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
   const sorted = [...filtered].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
 
   const openNew = () => setEditing({
-    id: uid(), customerId: customers[0]?.id || '', customerName: '', orderDate: todayStr(), deliveryDate: '',
+    id: uid(), customerId: customers[0]?.id || '', customerName: '', source: '', orderDate: todayStr(), deliveryDate: '',
     status: 'moi', note: '', items: [], shippingFee: 0, depositAmount: 0,
     deliveryMethod: '', shippingCarrier: '', trackingCode: '', commission: 0, printRequest: '',
   });
@@ -1524,7 +1622,14 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
             <Card key={o.id} style={{ padding: '12px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14.5 }}>{customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)'}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14.5 }}>{customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)'}</span>
+                    {(customerMap[o.customerId]?.source || o.source) && (
+                      <span style={{ fontSize: 11, color: '#7A4A16', background: '#FBF0DE', border: '1px solid #E9D3AC', borderRadius: 4, padding: '1px 7px' }}>
+                        {customerMap[o.customerId]?.source || o.source}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 12, color: '#8A8574' }}>
                     Đặt: {o.orderDate}{o.deliveryDate ? ` · Giao: ${o.deliveryDate}` : ''}
                     {o.deliveryMethod ? ` · ${o.deliveryMethod}` : ''}
@@ -1618,6 +1723,7 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
   const itemsTotal = (form.items || []).reduce((s, it) => s + it.price * it.qty, 0);
   const total = itemsTotal + Number(form.shippingFee || 0);
   const revenue = total - Number(form.commission || 0);
+  const isKnownOrderSource = !form.source || CUSTOMER_SOURCES.includes(form.source);
 
   const addProductItem = () => {
     if (products.length === 0) return;
@@ -1649,7 +1755,10 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
         <div style={{ flex: 1 }}>
           <Field label="Khách hàng">
             {customers.length > 0 ? (
-              <select style={inputStyle} value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, customerName: '' })}>
+              <select style={inputStyle} value={form.customerId} onChange={(e) => {
+                const cust = customers.find((c) => c.id === e.target.value);
+                setForm({ ...form, customerId: e.target.value, customerName: '', source: form.source || cust?.source || form.source });
+              }}>
                 <option value="">— Nhập tên tay bên dưới —</option>
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -1670,6 +1779,19 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
           </Field>
         </div>
       </div>
+
+      <Field label="Nguồn khách hàng">
+        <select style={inputStyle} value={isKnownOrderSource ? (form.source || '') : '__other__'}
+          onChange={(e) => setForm({ ...form, source: e.target.value === '__other__' ? '' : e.target.value })}>
+          <option value="">— Chọn nguồn —</option>
+          {CUSTOMER_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+          <option value="__other__">Khác (tự nhập)...</option>
+        </select>
+        {!isKnownOrderSource && (
+          <input style={{ ...inputStyle, marginTop: 6 }} value={form.source || ''}
+            onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="Nhập nguồn khác" />
+        )}
+      </Field>
 
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
