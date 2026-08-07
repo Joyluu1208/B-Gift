@@ -42,6 +42,18 @@ const STATUS = [
   { key: 'huy', label: 'Đã huỷ', color: '#A8493F' },
 ];
 
+const PRODUCT_CATEGORIES = ['Tháp bánh sinh nhật', 'Set túi quà sinh nhật', 'Hoa bánh kẹo'];
+
+const PRODUCT_COLORS = [
+  { key: 'hong', label: 'Hồng', hex: '#E88CA8' },
+  { key: 'xanhla', label: 'Xanh Lá', hex: '#6FA96B' },
+  { key: 'tim', label: 'Tím', hex: '#9B7EBD' },
+  { key: 'xanhduong', label: 'Xanh Dương', hex: '#5B8DBE' },
+  { key: 'do', label: 'Đỏ', hex: '#C1443C' },
+  { key: 'vangnau', label: 'Vàng Nâu', hex: '#B8863C' },
+  { key: 'khac', label: 'Khác', hex: '#9C9585' },
+];
+
 function StatusStamp({ statusKey }) {
   const s = STATUS.find((x) => x.key === statusKey) || STATUS[0];
   return (
@@ -202,7 +214,79 @@ function Modal({ title, onClose, children, width = 480 }) {
   );
 }
 
-export default function App() {
+async function loadKey(key) {
+  try {
+    const r = await storage.get(key);
+    return r ? JSON.parse(r.value) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveKey(key, data) {
+  try { await storage.set(key, JSON.stringify(data)); }
+  catch (e) { console.error('Lỗi lưu dữ liệu', key, e); }
+}
+
+function computeProductCostFor(prod, materialMap) {
+  if (prod.manualPrice) {
+    const sell = Number(prod.manualSellPrice || 0);
+    return { cost: null, sell };
+  }
+  const matCost = (prod.materials || []).reduce((sum, mi) => {
+    const m = materialMap[mi.materialId];
+    return sum + (m ? m.unitPrice * mi.qty : 0);
+  }, 0);
+  const cost = matCost + Number(prod.laborCost || 0);
+  const sell = cost * (1 + Number(prod.profitPct || 0) / 100);
+  return { cost, sell };
+}
+
+function PublicMenuApp() {
+  const [ready, setReady] = useState(false);
+  const [materials, setMaterials] = useState([]);
+  const [products, setProducts] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      const [m, p] = await Promise.all([loadKey('materials'), loadKey('products')]);
+      setMaterials(m); setProducts(p);
+      setReady(true);
+    })();
+  }, []);
+
+  const materialMap = useMemo(() => Object.fromEntries(materials.map((m) => [m.id, m])), [materials]);
+  const computeProductCost = (prod) => computeProductCostFor(prod, materialMap);
+
+  if (!ready) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: '#6B6759', fontFamily: 'ui-sans-serif, system-ui' }}>
+        Đang tải...
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', background: '#F2EFE6', minHeight: '100vh', color: '#232019' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 16px' }}>
+        <header style={{ padding: '24px 0 16px', borderBottom: '2px solid #1E2A38' }}>
+          <h1 style={{
+            margin: 0, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 24,
+            fontWeight: 700, color: '#1E2A38', letterSpacing: '-0.01em',
+          }}>
+            Bơ Gift Biên Hòa
+          </h1>
+          <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>Bảng giá sản phẩm</span>
+        </header>
+        <main style={{ paddingTop: 20, paddingBottom: 60 }}>
+          <MenuTab products={products} computeProductCost={computeProductCost} />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function AdminApp() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState('dashboard');
   const [materials, setMaterials] = useState([]);
@@ -212,26 +296,15 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const load = async (key) => {
-        try {
-          const r = await storage.get(key);
-          return r ? JSON.parse(r.value) : [];
-        } catch {
-          return [];
-        }
-      };
       const [m, p, c, o] = await Promise.all([
-        load('materials'), load('products'), load('customers'), load('orders'),
+        loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
       setReady(true);
     })();
   }, []);
 
-  const persist = async (key, data) => {
-    try { await storage.set(key, JSON.stringify(data)); }
-    catch (e) { console.error('Lỗi lưu dữ liệu', key, e); }
-  };
+  const persist = (key, data) => { saveKey(key, data); };
 
   const saveMaterials = (d) => { setMaterials(d); persist('materials', d); };
   const saveProducts = (d) => { setProducts(d); persist('products', d); };
@@ -581,11 +654,48 @@ function MaterialForm({ data, onSubmit, onCancel }) {
   );
 }
 
+function filterPillStyle(active, accent) {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6,
+    fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+    border: `1px solid ${active ? (accent || '#1E2A38') : '#D7D2C2'}`,
+    background: active ? (accent || '#1E2A38') : '#fff',
+    color: active ? '#fff' : '#6B6759',
+  };
+}
+
+function CategoryColorFilter({ category, setCategory, color, setColor }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        <button onClick={() => setCategory('')} style={filterPillStyle(category === '')}>Tất cả loại</button>
+        {PRODUCT_CATEGORIES.map((c) => (
+          <button key={c} onClick={() => setCategory(c)} style={filterPillStyle(category === c)}>{c}</button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button onClick={() => setColor('')} style={filterPillStyle(color === '')}>Tất cả màu</button>
+        {PRODUCT_COLORS.map((c) => (
+          <button key={c.key} onClick={() => setColor(c.key)} style={filterPillStyle(color === c.key, c.hex)}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
+            {c.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProductsTab({ products, saveProducts, materials, computeProductCost }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterColor, setFilterColor] = useState('');
+  const filtered = products.filter((p) =>
+    (!filterCategory || p.category === filterCategory) && (!filterColor || p.color === filterColor)
+  );
 
-  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0 });
+  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '' });
 
   const submit = (data) => {
     const exists = products.some((p) => p.id === data.id);
@@ -602,17 +712,24 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
         <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
       </div>
 
-      {products.length === 0 ? (
+      {products.length > 0 && (
+        <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} />
+      )}
+
+      {filtered.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>
-          {materials.length === 0
-            ? 'Hãy thêm vật liệu trước, sau đó tạo sản phẩm để tính giá bán tự động.'
-            : 'Chưa có sản phẩm nào. Nhấn "Thêm sản phẩm" để bắt đầu.'}
+          {products.length === 0
+            ? (materials.length === 0
+              ? 'Hãy thêm vật liệu trước, sau đó tạo sản phẩm để tính giá bán tự động.'
+              : 'Chưa có sản phẩm nào. Nhấn "Thêm sản phẩm" để bắt đầu.')
+            : 'Không có sản phẩm nào khớp bộ lọc.'}
         </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {products.map((p) => {
+          {filtered.map((p) => {
             const { cost, sell } = computeProductCost(p);
             const isOpen = expanded === p.id;
+            const colorInfo = PRODUCT_COLORS.find((c) => c.key === p.color);
             return (
               <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
@@ -623,6 +740,8 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost }) 
                       <img src={p.imageUrl} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', border: '1px solid #E3DFD3' }} onError={(e) => { e.target.style.display = 'none'; }} />
                     )}
                     <span style={{ fontWeight: 700, fontSize: 14.5 }}>{p.name}</span>
+                    {colorInfo && <span style={{ width: 10, height: 10, borderRadius: '50%', background: colorInfo.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} title={colorInfo.label} />}
+                    {p.category && <span style={{ fontSize: 11, color: '#8A8574', border: '1px solid #E3DFD3', borderRadius: 4, padding: '1px 6px' }}>{p.category}</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                     {!p.manualPrice && (
@@ -716,6 +835,25 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
       <Field label="Tên sản phẩm">
         <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VD: Cửa sắt hoa văn" autoFocus />
       </Field>
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Loại sản phẩm">
+            <select style={inputStyle} value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              <option value="">— Chọn loại —</option>
+              {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Màu sắc">
+            <select style={inputStyle} value={form.color || ''} onChange={(e) => setForm({ ...form, color: e.target.value })}>
+              <option value="">— Chọn màu —</option>
+              {PRODUCT_COLORS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </Field>
+        </div>
+      </div>
 
       <Field label="Ảnh sản phẩm">
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -838,7 +976,13 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost }
 
 function MenuTab({ products, computeProductCost }) {
   const [search, setSearch] = useState('');
-  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterColor, setFilterColor] = useState('');
+  const filtered = products.filter((p) =>
+    p.name.toLowerCase().includes(search.toLowerCase()) &&
+    (!filterCategory || p.category === filterCategory) &&
+    (!filterColor || p.color === filterColor)
+  );
 
   if (products.length === 0) {
     return (
@@ -850,35 +994,45 @@ function MenuTab({ products, computeProductCost }) {
 
   return (
     <div>
-      <div style={{ position: 'relative', marginBottom: 18, maxWidth: 320 }}>
+      <div style={{ position: 'relative', marginBottom: 14, maxWidth: 320 }}>
         <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
         <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
-        {filtered.map((p) => {
-          const { sell } = computeProductCost(p);
-          return (
-            <div key={p.id} style={{
-              background: '#FFFFFF', borderRadius: 12, border: '1px solid #E3DFD3', overflow: 'hidden',
-              display: 'flex', flexDirection: 'column',
-            }}>
-              <div style={{ aspectRatio: '1 / 1', background: '#EFEBDE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {p.imageUrl ? (
-                  <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
-                ) : null}
-                <div style={{ display: p.imageUrl ? 'none' : 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-                  <ImageIcon size={28} color="#C7C2AE" />
+      <CategoryColorFilter category={filterCategory} setCategory={setFilterCategory} color={filterColor} setColor={setFilterColor} />
+      {filtered.length === 0 ? (
+        <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>Không có sản phẩm nào khớp bộ lọc.</Card>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+          {filtered.map((p) => {
+            const { sell } = computeProductCost(p);
+            const colorInfo = PRODUCT_COLORS.find((c) => c.key === p.color);
+            return (
+              <div key={p.id} style={{
+                background: '#FFFFFF', borderRadius: 12, border: '1px solid #E3DFD3', overflow: 'hidden',
+                display: 'flex', flexDirection: 'column',
+              }}>
+                <div style={{ aspectRatio: '1 / 1', background: '#EFEBDE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {p.imageUrl ? (
+                    <img src={p.imageUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+                  ) : null}
+                  <div style={{ display: p.imageUrl ? 'none' : 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                    <ImageIcon size={28} color="#C7C2AE" />
+                  </div>
+                </div>
+                <div style={{ padding: '10px 12px 12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    {colorInfo && <span style={{ width: 9, height: 9, borderRadius: '50%', background: colorInfo.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />}
+                    {p.category && <span style={{ fontSize: 10.5, color: '#8A8574' }}>{p.category}</span>}
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: '#1E2A38' }}>{p.name}</div>
+                  <Money value={sell} size={14} bold />
                 </div>
               </div>
-              <div style={{ padding: '10px 12px 12px' }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: '#1E2A38' }}>{p.name}</div>
-                <Money value={sell} size={14} bold />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1367,4 +1521,9 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
       </div>
     </form>
   );
+}
+
+export default function Root() {
+  const isPublicMenu = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'menu';
+  return isPublicMenu ? <PublicMenuApp /> : <AdminApp />;
 }
