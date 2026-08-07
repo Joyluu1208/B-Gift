@@ -27,4 +27,16 @@ export const storage = {
     if (error) throw error;
     return { key, value };
   },
+  // Tải 1 file ảnh lên kho lưu trữ Supabase Storage, trả về link công khai (URL)
+  // ngắn gọn để lưu vào sản phẩm — thay vì nhét cả ảnh vào dữ liệu JSON.
+  async uploadImage(file) {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage
+      .from('product-images')
+      .upload(path, file, { cacheControl: '3600', upsert: false });
+    if (error) throw error;
+    const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+    return data.publicUrl;
+  },
 };
