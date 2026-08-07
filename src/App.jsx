@@ -820,10 +820,11 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
 
-  const handleDrop = (targetId) => {
-    if (!dragId || dragId === targetId) { setDragOverId(null); return; }
+  const handleDrop = (targetId, sourceIdFromEvent) => {
+    const sourceId = dragId || sourceIdFromEvent;
+    if (!sourceId || sourceId === targetId) { setDragOverId(null); return; }
     const next = [...products];
-    const fromIdx = next.findIndex((p) => p.id === dragId);
+    const fromIdx = next.findIndex((p) => p.id === sourceId);
     const toIdx = next.findIndex((p) => p.id === targetId);
     if (fromIdx === -1 || toIdx === -1) { setDragOverId(null); return; }
     const [moved] = next.splice(fromIdx, 1);
@@ -879,14 +880,19 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
               }}
                 onDragOver={(e) => { e.preventDefault(); setDragOverId(p.id); }}
                 onDragLeave={() => setDragOverId((cur) => (cur === p.id ? null : cur))}
-                onDrop={(e) => { e.preventDefault(); handleDrop(p.id); }}
+                onDrop={(e) => { e.preventDefault(); handleDrop(p.id, e.dataTransfer.getData('text/plain')); }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
                   onClick={() => setExpanded(isOpen ? null : p.id)}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span
                       draggable
-                      onDragStart={(e) => { e.stopPropagation(); setDragId(p.id); }}
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', p.id);
+                        setDragId(p.id);
+                      }}
                       onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                       onClick={(e) => e.stopPropagation()}
                       title="Kéo để đổi vị trí"
