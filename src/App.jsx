@@ -413,6 +413,8 @@ function AdminApp() {
     const next = customColors.map((c) => (c.key === key ? { ...c, label: trimmed, hex: newHex || c.hex } : c));
     setCustomColors(next); persist('customColors', next);
   };
+  const reorderCategories = (next) => { setCustomCategories(next); persist('customCategories', next); };
+  const reorderColors = (next) => { setCustomColors(next); persist('customColors', next); };
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
@@ -564,7 +566,7 @@ function AdminApp() {
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
               categories={allCategories} colors={allColors} onAddCategory={addCategory} onAddColor={addColor}
               customCategories={customCategories} customColors={customColors} onRemoveCategory={removeCategory} onRemoveColor={removeColor}
-              onEditCategory={editCategory} onEditColor={editColor} />
+              onEditCategory={editCategory} onEditColor={editColor} onReorderCategories={reorderCategories} onReorderColors={reorderColors} />
           )}
           {tab === 'menu' && (
             <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
@@ -805,7 +807,7 @@ function CategoryColorFilter({ category, setCategory, selectedColors, toggleColo
   );
 }
 
-function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor }) {
+function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor, onReorderCategories, onReorderColors }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [search, setSearch] = useState('');
@@ -979,6 +981,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
           customCategories={customCategories} customColors={customColors}
           onRemoveCategory={onRemoveCategory} onRemoveColor={onRemoveColor}
           onEditCategory={onEditCategory} onEditColor={onEditColor}
+          onReorderCategories={onReorderCategories} onReorderColors={onReorderColors}
           onClose={() => setManaging(false)}
         />
       )}
@@ -986,18 +989,48 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
   );
 }
 
-function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor, onClose }) {
+function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor, onReorderCategories, onReorderColors, onClose }) {
   const [editingCat, setEditingCat] = useState(null);
   const [catName, setCatName] = useState('');
   const [editingColorKey, setEditingColorKey] = useState(null);
   const [colorName, setColorName] = useState('');
   const [colorHex, setColorHex] = useState('#9C9585');
+  const [dragCat, setDragCat] = useState(null);
+  const [dragOverCat, setDragOverCat] = useState(null);
+  const [dragColorKey, setDragColorKey] = useState(null);
+  const [dragOverColorKey, setDragOverColorKey] = useState(null);
 
   const startEditCat = (c) => { setEditingCat(c); setCatName(c); };
   const saveEditCat = () => { onEditCategory(editingCat, catName); setEditingCat(null); };
 
   const startEditColor = (c) => { setEditingColorKey(c.key); setColorName(c.label); setColorHex(c.hex); };
   const saveEditColor = () => { onEditColor(editingColorKey, colorName, colorHex); setEditingColorKey(null); };
+
+  const dropCategory = (targetName, sourceFromEvent) => {
+    const source = dragCat || sourceFromEvent;
+    if (!source || source === targetName) { setDragOverCat(null); return; }
+    const next = [...customCategories];
+    const fromIdx = next.indexOf(source);
+    const toIdx = next.indexOf(targetName);
+    if (fromIdx === -1 || toIdx === -1) { setDragOverCat(null); return; }
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    onReorderCategories(next);
+    setDragCat(null); setDragOverCat(null);
+  };
+
+  const dropColor = (targetKey, sourceFromEvent) => {
+    const source = dragColorKey || sourceFromEvent;
+    if (!source || source === targetKey) { setDragOverColorKey(null); return; }
+    const next = [...customColors];
+    const fromIdx = next.findIndex((c) => c.key === source);
+    const toIdx = next.findIndex((c) => c.key === targetKey);
+    if (fromIdx === -1 || toIdx === -1) { setDragOverColorKey(null); return; }
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    onReorderColors(next);
+    setDragColorKey(null); setDragOverColorKey(null);
+  };
 
   return (
     <Modal title="Quản lý loại & màu" onClose={onClose} width={420}>
@@ -1008,7 +1041,15 @@ function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveC
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {customCategories.map((c) => (
-              <div key={c} style={{ padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+              <div key={c} style={{
+                padding: '6px 10px', background: '#F2EFE6', borderRadius: 6,
+                opacity: dragCat === c ? 0.4 : 1,
+                border: dragOverCat === c ? '2px dashed #1E2A38' : '2px dashed transparent',
+              }}
+                onDragOver={(e) => { e.preventDefault(); setDragOverCat(c); }}
+                onDragLeave={() => setDragOverCat((cur) => (cur === c ? null : cur))}
+                onDrop={(e) => { e.preventDefault(); dropCategory(c, e.dataTransfer.getData('text/plain')); }}
+              >
                 {editingCat === c ? (
                   <div style={{ display: 'flex', gap: 6 }}>
                     <input style={{ ...inputStyle, padding: '5px 8px' }} value={catName} autoFocus
@@ -1018,7 +1059,18 @@ function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveC
                   </div>
                 ) : (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13 }}>{c}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span
+                        draggable
+                        onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c); setDragCat(c); }}
+                        onDragEnd={() => { setDragCat(null); setDragOverCat(null); }}
+                        title="Kéo để đổi vị trí"
+                        style={{ cursor: 'grab', display: 'flex', color: '#B8B3A2' }}
+                      >
+                        <GripVertical size={14} />
+                      </span>
+                      <span style={{ fontSize: 13 }}>{c}</span>
+                    </span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button onClick={() => startEditCat(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759' }}><Pencil size={13} /></button>
                       <button onClick={() => onRemoveCategory(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={13} /></button>
@@ -1038,7 +1090,15 @@ function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveC
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {customColors.map((c) => (
-              <div key={c.key} style={{ padding: '6px 10px', background: '#F2EFE6', borderRadius: 6 }}>
+              <div key={c.key} style={{
+                padding: '6px 10px', background: '#F2EFE6', borderRadius: 6,
+                opacity: dragColorKey === c.key ? 0.4 : 1,
+                border: dragOverColorKey === c.key ? '2px dashed #1E2A38' : '2px dashed transparent',
+              }}
+                onDragOver={(e) => { e.preventDefault(); setDragOverColorKey(c.key); }}
+                onDragLeave={() => setDragOverColorKey((cur) => (cur === c.key ? null : cur))}
+                onDrop={(e) => { e.preventDefault(); dropColor(c.key, e.dataTransfer.getData('text/plain')); }}
+              >
                 {editingColorKey === c.key ? (
                   <div style={{ display: 'flex', gap: 6 }}>
                     <input type="color" value={colorHex} onChange={(e) => setColorHex(e.target.value)}
@@ -1051,6 +1111,15 @@ function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveC
                 ) : (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                      <span
+                        draggable
+                        onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.key); setDragColorKey(c.key); }}
+                        onDragEnd={() => { setDragColorKey(null); setDragOverColorKey(null); }}
+                        title="Kéo để đổi vị trí"
+                        style={{ cursor: 'grab', display: 'flex', color: '#B8B3A2' }}
+                      >
+                        <GripVertical size={14} />
+                      </span>
                       <span style={{ width: 10, height: 10, borderRadius: '50%', background: c.hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.15)' }} />
                       {c.label}
                     </span>
