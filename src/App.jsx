@@ -5,6 +5,12 @@ import * as XLSX from 'xlsx';
 import { storage, auth, notify } from './storage.js';
 
 const fmtVND = (n) => new Intl.NumberFormat('vi-VN').format(Math.round(n || 0)) + ' đ';
+const normalizeVN = (str) => (str || '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/đ/g, 'd');
+const matchesSearch = (name, query) => normalizeVN(name).includes(normalizeVN(query));
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -667,7 +673,7 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
 function MaterialsTab({ materials, saveMaterials }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
-  const filtered = materials.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = materials.filter((m) => matchesSearch(m.name, search));
   const totalStockValue = materials.reduce((s, m) => s + Number(m.stockQty || 0) * Number(m.unitPrice || 0), 0);
 
   const openNew = () => setEditing({ id: uid(), name: '', unit: '', unitPrice: 0, stockQty: 0, note: '' });
@@ -818,7 +824,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     setFilterColors((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
   };
   const filtered = products.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) &&
+    matchesSearch(p.name, search) &&
     (!filterCategory || p.category === filterCategory) && (filterColors.length === 0 || filterColors.includes(p.color))
   );
 
@@ -1374,7 +1380,19 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, 
   );
 }
 
+function isMobileDevice() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
 async function downloadImage(url, filename) {
+  // Trên điện thoại, tải file (download) sẽ lưu vào mục Tệp thay vì Album ảnh —
+  // giới hạn của trình duyệt di động, không có cách nào ép lưu thẳng vào Photos
+  // bằng code. Cách đúng là mở ảnh ra để khách nhấn giữ và chọn "Lưu ảnh".
+  if (isMobileDevice()) {
+    window.open(url, '_blank');
+    return;
+  }
   try {
     const res = await fetch(url);
     const blob = await res.blob();
@@ -1408,7 +1426,7 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
   };
   const filtered = products.filter((p) => {
     const { sell } = computeProductCost(p);
-    if (!p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (!matchesSearch(p.name, search)) return false;
     if (filterCategory && p.category !== filterCategory) return false;
     if (filterColors.length > 0 && !filterColors.includes(p.color)) return false;
     if (minPrice !== '' && sell < Number(minPrice)) return false;
@@ -1580,6 +1598,12 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
           >
             <Download size={15} /> Tải ảnh về
           </button>
+          <div style={{
+            position: 'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
+            fontSize: 11, color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap',
+          }}>
+            Trên điện thoại: nhấn giữ vào ảnh và chọn "Lưu ảnh" để lưu vào Album
+          </div>
         </div>
       )}
     </div>
@@ -1589,7 +1613,7 @@ function MenuTab({ products, computeProductCost, categories, colors }) {
 function CustomersTab({ customers, saveCustomers, orders }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
-  const filtered = customers.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search));
+  const filtered = customers.filter((c) => matchesSearch(c.name, search) || (c.phone || '').includes(search));
 
   const openNew = () => setEditing({
     id: uid(), name: '', phone: '', address: '', note: '',
