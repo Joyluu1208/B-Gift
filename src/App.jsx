@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
 import { storage, auth, notify } from './storage.js';
@@ -1688,6 +1688,85 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
 
   const remove = (id) => saveOrders(orders.filter((o) => o.id !== id));
 
+  const printOrder = (o) => {
+    const custName = customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)';
+    const custSource = customerMap[o.customerId]?.source || o.source || '';
+    const custPhone = customerMap[o.customerId]?.phone || '';
+    const custAddress = customerMap[o.customerId]?.address || '';
+    const statusLabel = STATUS.find((s) => s.key === o.status)?.label || o.status;
+    const total = orderTotal(o);
+    const remain = total - Number(o.depositAmount || 0);
+    const itemsRows = (o.items || []).map((it) => {
+      const name = it.manual ? it.name : (productMap[it.productId]?.name || '(đã xoá)');
+      return `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #E3DFD3;">${name}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #E3DFD3;text-align:center;">${it.qty}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #E3DFD3;text-align:right;">${fmtVND(it.price)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #E3DFD3;text-align:right;">${fmtVND(it.price * it.qty)}</td>
+      </tr>`;
+    }).join('');
+
+    const row = (label, value) => value ? `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px;">
+      <span style="color:#8A8574;">${label}</span><span style="font-weight:600;">${value}</span></div>` : '';
+
+    const html = `<!doctype html>
+<html lang="vi"><head><meta charset="UTF-8" />
+<title>Đơn hàng - ${custName}</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color:#232019; padding:32px; max-width:640px; margin:0 auto; }
+  h1 { font-family: Georgia, serif; font-size:22px; color:#1E2A38; margin:0 0 2px; }
+  .sub { color:#8A8574; font-size:12px; margin-bottom:20px; }
+  h2 { font-size:14px; color:#1E2A38; margin:18px 0 8px; border-bottom:2px solid #1E2A38; padding-bottom:4px; }
+  table { width:100%; border-collapse:collapse; margin-top:6px; }
+  th { text-align:left; font-size:12px; color:#8A8574; padding:6px 8px; border-bottom:2px solid #1E2A38; }
+  .total-box { background:#F2EFE6; border-radius:8px; padding:12px 14px; margin-top:14px; }
+  .total-final { display:flex; justify-content:space-between; font-size:16px; font-weight:700; padding-top:6px; margin-top:6px; border-top:1px solid #D7D2C2; }
+  @media print { body { padding:0; } }
+</style></head>
+<body>
+  <h1>Bơ Gift Biên Hòa</h1>
+  <div class="sub">Đơn hàng — In ngày ${todayStr()}</div>
+
+  <h2>Thông tin khách hàng</h2>
+  ${row('Tên khách', custName)}
+  ${row('Số điện thoại', custPhone)}
+  ${row('Địa chỉ', custAddress)}
+  ${row('Nguồn', custSource)}
+
+  <h2>Thông tin đơn hàng</h2>
+  ${row('Trạng thái', statusLabel)}
+  ${row('Ngày đặt', o.orderDate)}
+  ${row('Ngày giao dự kiến', o.deliveryDate)}
+  ${row('Hình thức giao', o.deliveryMethod)}
+  ${row('Đơn vị vận chuyển', o.shippingCarrier)}
+  ${row('Mã vận đơn', o.trackingCode)}
+  ${row('Nội dung tag/yêu cầu in', o.printRequest)}
+  ${row('Ghi chú', o.note)}
+
+  <h2>Sản phẩm</h2>
+  <table>
+    <thead><tr><th>Tên sản phẩm</th><th style="text-align:center;">SL</th><th style="text-align:right;">Đơn giá</th><th style="text-align:right;">Thành tiền</th></tr></thead>
+    <tbody>${itemsRows || '<tr><td colspan="4" style="padding:10px;color:#8A8574;">(chưa có sản phẩm)</td></tr>'}</tbody>
+  </table>
+
+  <div class="total-box">
+    ${row('Phí ship', Number(o.shippingFee) > 0 ? fmtVND(o.shippingFee) : '')}
+    ${row('Hoa hồng', Number(o.commission) > 0 ? '-' + fmtVND(o.commission) : '')}
+    ${row('Đã cọc', Number(o.depositAmount) > 0 ? fmtVND(o.depositAmount) : '')}
+    <div class="total-final"><span>Tổng tiền đơn hàng</span><span>${fmtVND(total)}</span></div>
+    ${Number(o.depositAmount) > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:${remain > 0 ? '#7A4A16' : '#2F5233'};margin-top:4px;">
+      <span>${remain > 0 ? 'Còn phải thu' : 'Đã thu đủ'}</span><span>${remain > 0 ? fmtVND(remain) : ''}</span></div>` : ''}
+  </div>
+</body></html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { window.alert('Trình duyệt đang chặn cửa sổ popup — vui lòng cho phép popup để in đơn.'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
@@ -1745,6 +1824,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <Money value={orderTotal(o)} bold size={14} />
                   <StatusStampPicker statusKey={o.status} onChange={(newStatus) => saveOrders(orders.map((x) => (x.id === o.id ? { ...x, status: newStatus } : x)))} />
+                  <button onClick={() => printOrder(o)} title="In đơn hàng" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Printer size={14} /></button>
                   <button onClick={() => setEditing(o)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
                   <button onClick={() => remove(o.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
                 </div>
