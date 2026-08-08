@@ -808,6 +808,7 @@ function CategoryColorFilter({ category, setCategory, selectedColors, toggleColo
 function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterColors, setFilterColors] = useState([]);
   const toggleFilterColor = (key) => {
@@ -815,6 +816,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     setFilterColors((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
   };
   const filtered = products.filter((p) =>
+    p.name.toLowerCase().includes(search.toLowerCase()) &&
     (!filterCategory || p.category === filterCategory) && (filterColors.length === 0 || filterColors.includes(p.color))
   );
 
@@ -850,9 +852,15 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 14 }}>
-        <Btn onClick={() => setManaging(true)}>Quản lý loại &amp; màu</Btn>
-        <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+          <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
+          <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm sản phẩm theo tên..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn onClick={() => setManaging(true)}>Quản lý loại &amp; màu</Btn>
+          <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
+        </div>
       </div>
 
       {products.length > 0 && (
