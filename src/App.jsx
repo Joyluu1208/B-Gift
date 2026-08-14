@@ -301,10 +301,10 @@ function BannerCarousel({ images }) {
   }, [images.length]);
 
   return (
-    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', margin: '20px 0', aspectRatio: '16 / 6', background: '#EFEBDE' }}>
+    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', margin: '20px 0', background: '#1E2A38', height: 'clamp(180px, 40vw, 380px)' }}>
       {images.map((url, i) => (
         <img key={i} src={url} alt="" style={{
-          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
           opacity: i === idx ? 1 : 0, transition: 'opacity 0.6s ease',
         }} />
       ))}
