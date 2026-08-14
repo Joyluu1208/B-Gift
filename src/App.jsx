@@ -288,7 +288,9 @@ function computeProductCostFor(prod, materialMap) {
     return sum + (m ? m.unitPrice * mi.qty : 0);
   }, 0);
   const cost = matCost + Number(prod.laborCost || 0);
-  const sell = cost * (1 + Number(prod.profitPct || 0) / 100);
+  // Lợi nhuận tính trên giá bán (margin): 50% lợi nhuận = giá bán gấp đôi giá vốn.
+  const profitPct = Math.min(99, Math.max(0, Number(prod.profitPct || 0)));
+  const sell = cost / (1 - profitPct / 100);
   return { cost, sell };
 }
 
@@ -648,7 +650,8 @@ function AdminApp() {
       return sum + (m ? m.unitPrice * mi.qty : 0);
     }, 0);
     const cost = matCost + Number(prod.laborCost || 0);
-    const sell = cost * (1 + Number(prod.profitPct || 0) / 100);
+    const profitPct = Math.min(99, Math.max(0, Number(prod.profitPct || 0)));
+    const sell = cost / (1 - profitPct / 100);
     return { cost, sell };
   };
 
@@ -1995,8 +1998,8 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, 
               </Field>
             </div>
             <div style={{ flex: 1 }}>
-              <Field label="Lợi nhuận (%)">
-                <input style={inputStyle} type="number" min="0" value={form.profitPct} onChange={(e) => setForm({ ...form, profitPct: Number(e.target.value) })} />
+              <Field label="Lợi nhuận trên giá bán (%)">
+                <input style={inputStyle} type="number" min="0" max="99" value={form.profitPct} onChange={(e) => setForm({ ...form, profitPct: Math.min(99, Number(e.target.value)) })} />
               </Field>
             </div>
           </div>
