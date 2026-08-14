@@ -1976,13 +1976,17 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, 
               <>
                 {(form.materials || []).map((mi, idx) => {
                   const m = materials.find((x) => x.id === mi.materialId);
+                  const lineTotal = (m?.unitPrice || 0) * Number(mi.qty || 0);
                   return (
                     <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
                       <select style={{ ...inputStyle, flex: 2 }} value={mi.materialId} onChange={(e) => updateRow(idx, 'materialId', e.target.value)}>
                         {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
                       </select>
-                      <input style={{ ...inputStyle, flex: 1 }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} />
-                      <span style={{ fontSize: 12, color: '#8A8574', minWidth: 30 }}>{m?.unit}</span>
+                      <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} />
+                      <span style={{ fontSize: 12, color: '#8A8574', minWidth: 26 }}>{m?.unit}</span>
+                      <div style={{ flex: '0 0 90px', textAlign: 'right' }}>
+                        <Money value={lineTotal} size={12} />
+                      </div>
                       <button type="button" onClick={() => removeRow(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
                     </div>
                   );
