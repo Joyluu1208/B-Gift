@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer, Phone, MessageCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
 import { storage, auth, notify } from './storage.js';
@@ -292,6 +292,36 @@ function computeProductCostFor(prod, materialMap) {
   return { cost, sell };
 }
 
+function BannerCarousel({ images }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (images.length <= 1) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % images.length), 4000);
+    return () => clearInterval(t);
+  }, [images.length]);
+
+  return (
+    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', margin: '20px 0', aspectRatio: '16 / 6', background: '#EFEBDE' }}>
+      {images.map((url, i) => (
+        <img key={i} src={url} alt="" style={{
+          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          opacity: i === idx ? 1 : 0, transition: 'opacity 0.6s ease',
+        }} />
+      ))}
+      {images.length > 1 && (
+        <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 6 }}>
+          {images.map((_, i) => (
+            <button key={i} onClick={() => setIdx(i)} style={{
+              width: 7, height: 7, borderRadius: '50%', border: 'none', cursor: 'pointer',
+              background: i === idx ? '#fff' : 'rgba(255,255,255,0.5)',
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PublicMenuApp() {
   const [ready, setReady] = useState(false);
   const [materials, setMaterials] = useState([]);
@@ -299,14 +329,20 @@ function PublicMenuApp() {
   const [customCategories, setCustomCategories] = useState([]);
   const [customColors, setCustomColors] = useState([]);
   const [shopSettings, setShopSettings] = useState({ logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' });
+  const [bannerImages, setBannerImages] = useState([]);
+  const [feedbackImages, setFeedbackImages] = useState([]);
+  const [heroCategory, setHeroCategory] = useState('');
+  const [feedbackPreview, setFeedbackPreview] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [m, p, cc, cl, ss] = await Promise.all([
+      const [m, p, cc, cl, ss, bi, fi] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customCategories'), loadKey('customColors'),
         loadKey('shopSettings', { logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' }),
+        loadKey('bannerImages'), loadKey('feedbackImages'),
       ]);
       setMaterials(m); setProducts(p); setCustomCategories(cc); setCustomColors(cl); setShopSettings(ss);
+      setBannerImages(bi); setFeedbackImages(fi);
       setReady(true);
     })();
   }, []);
@@ -315,6 +351,16 @@ function PublicMenuApp() {
   const computeProductCost = (prod) => computeProductCostFor(prod, materialMap);
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
+
+  const categoryTiles = useMemo(() => {
+    return allCategories
+      .map((cat) => {
+        const match = products.find((p) => p.category === cat && p.imageUrl);
+        const count = products.filter((p) => p.category === cat).length;
+        return count > 0 ? { name: cat, imageUrl: match?.imageUrl || '', count } : null;
+      })
+      .filter(Boolean);
+  }, [products, allCategories]);
 
   if (!ready) {
     return (
@@ -325,7 +371,12 @@ function PublicMenuApp() {
   }
 
   const zaloDigits = (shopSettings.zalo || '').replace(/[^0-9]/g, '');
-  const phoneDigits = (shopSettings.phone || '').replace(/[^0-9]/g, '');
+  const phoneDigits = (shopSettings.phone || '').split(/[\/,;]/)[0].replace(/[^0-9]/g, '');
+
+  const goToCategory = (cat) => {
+    setHeroCategory(cat);
+    setTimeout(() => document.getElementById('menu-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   return (
     <div style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', background: '#F2EFE6', minHeight: '100vh', color: '#232019' }}>
@@ -345,12 +396,110 @@ function PublicMenuApp() {
             {shopSettings.address && <div style={{ fontSize: 11.5, color: '#8A8574' }}>{shopSettings.address}</div>}
           </div>
         </header>
-        <main style={{ paddingTop: 20, paddingBottom: 100 }}>
-          <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
+
+        {bannerImages.length > 0 ? (
+          <BannerCarousel images={bannerImages} />
+        ) : (
+          <div style={{
+            margin: '20px 0', borderRadius: 16, overflow: 'hidden', position: 'relative',
+            background: shopSettings.logoUrl
+              ? `linear-gradient(135deg, rgba(30,42,56,0.78), rgba(184,118,60,0.55)), url(${shopSettings.logoUrl}) center/cover`
+              : 'linear-gradient(135deg, #1E2A38, #B8763B)',
+            padding: '48px 28px', textAlign: 'center',
+          }}>
+            <h2 style={{
+              margin: '0 0 8px', color: '#fff', fontFamily: 'Georgia, "Times New Roman", serif',
+              fontSize: 26, fontWeight: 700, textShadow: '0 2px 6px rgba(0,0,0,0.3)',
+            }}>
+              Hoa & Quà Tặng Bơ Gift
+            </h2>
+            <p style={{ margin: 0, color: 'rgba(255,255,255,0.9)', fontSize: 13.5, maxWidth: 460, marginLeft: 'auto', marginRight: 'auto' }}>
+              Mỗi món quà là một câu chuyện — chọn ngay mẫu bạn thích bên dưới hoặc liên hệ để được tư vấn.
+            </p>
+            <button onClick={() => document.getElementById('menu-grid')?.scrollIntoView({ behavior: 'smooth' })}
+              style={{
+                marginTop: 18, background: '#fff', color: '#1E2A38', border: 'none', borderRadius: 8,
+                padding: '10px 22px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer',
+              }}>
+              Xem sản phẩm
+            </button>
+          </div>
+        )}
+
+        {categoryTiles.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#1E2A38', margin: '0 0 12px', fontFamily: 'Georgia, "Times New Roman", serif' }}>
+              Bộ Sưu Tập
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 12 }}>
+              <div onClick={() => goToCategory('')} style={{
+                cursor: 'pointer', borderRadius: 12, overflow: 'hidden', position: 'relative',
+                aspectRatio: '1 / 1', background: '#1E2A38', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, textAlign: 'center', padding: 8 }}>Tất cả sản phẩm</span>
+              </div>
+              {categoryTiles.map((c) => (
+                <div key={c.name} onClick={() => goToCategory(c.name)} style={{
+                  cursor: 'pointer', borderRadius: 12, overflow: 'hidden', position: 'relative', aspectRatio: '1 / 1',
+                  background: '#EFEBDE',
+                }}>
+                  {c.imageUrl ? (
+                    <img src={c.imageUrl} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ImageIcon size={26} color="#C7C2AE" />
+                    </div>
+                  )}
+                  <div style={{
+                    position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.65), transparent 55%)',
+                    display: 'flex', alignItems: 'flex-end', padding: 8,
+                  }}>
+                    <span style={{ color: '#fff', fontSize: 12, fontWeight: 700, lineHeight: 1.2 }}>{c.name}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <main id="menu-grid" style={{ paddingTop: 4, paddingBottom: 40, scrollMarginTop: 16 }}>
+          <MenuTab key={heroCategory} products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} initialCategory={heroCategory} />
         </main>
+
+        {feedbackImages.length > 0 && (
+          <div style={{ paddingBottom: 100 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#1E2A38', margin: '0 0 12px', fontFamily: 'Georgia, "Times New Roman", serif', textAlign: 'center' }}>
+              Feedback
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
+              {feedbackImages.map((url, i) => (
+                <div key={i} onClick={() => setFeedbackPreview(url)} style={{
+                  borderRadius: 12, overflow: 'hidden', aspectRatio: '1 / 1', background: '#EFEBDE', cursor: 'pointer',
+                }}>
+                  <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      <div style={{ position: 'fixed', right: 16, bottom: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 40 }}>
+      {feedbackPreview && (
+        <div onClick={() => setFeedbackPreview(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(10,10,8,0.92)', zIndex: 100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, cursor: 'zoom-out',
+        }}>
+          <img src={feedbackPreview} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
+          <button onClick={(e) => { e.stopPropagation(); setFeedbackPreview(null); }} style={{
+            position: 'absolute', top: 18, right: 18, background: 'rgba(255,255,255,0.15)', color: '#fff',
+            border: 'none', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            <X size={20} />
+          </button>
+        </div>
+      )}
+
+      <div style={{ position: 'fixed', left: 16, bottom: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 40 }}>
         {zaloDigits && (
           <a href={`https://zalo.me/${zaloDigits}`} target="_blank" rel="noreferrer" title="Chat Zalo"
             style={{ width: 50, height: 50, borderRadius: '50%', background: '#0068FF', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 12, fontWeight: 800, textDecoration: 'none' }}>
@@ -365,14 +514,14 @@ function PublicMenuApp() {
         )}
         {shopSettings.messenger && (
           <a href={shopSettings.messenger} target="_blank" rel="noreferrer" title="Nhắn tin Messenger"
-            style={{ width: 50, height: 50, borderRadius: '50%', background: 'linear-gradient(135deg,#00B2FF,#A033FF,#FF5280)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 10.5, fontWeight: 800, textDecoration: 'none', textAlign: 'center', lineHeight: 1.1 }}>
-            Nhắn tin
+            style={{ width: 50, height: 50, borderRadius: '50%', background: 'linear-gradient(135deg,#00B2FF,#A033FF,#FF5280)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', textDecoration: 'none' }}>
+            <MessageCircle size={22} fill="#fff" strokeWidth={0} />
           </a>
         )}
         {phoneDigits && (
           <a href={`tel:${phoneDigits}`} title="Gọi ngay"
-            style={{ width: 50, height: 50, borderRadius: '50%', background: '#5C7A5E', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 11, fontWeight: 800, textDecoration: 'none' }}>
-            Gọi
+            style={{ width: 50, height: 50, borderRadius: '50%', background: '#5C7A5E', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', textDecoration: 'none' }}>
+            <Phone size={20} fill="#fff" strokeWidth={0} />
           </a>
         )}
       </div>
@@ -394,6 +543,9 @@ function AdminApp() {
   const [customColors, setCustomColors] = useState([]);
   const [shopSettings, setShopSettings] = useState(DEFAULT_SHOP_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [bannerImages, setBannerImages] = useState([]);
+  const [feedbackImages, setFeedbackImages] = useState([]);
+  const [imagesOpen, setImagesOpen] = useState(false);
 
   useEffect(() => {
     auth.getSession().then(setSession);
@@ -405,12 +557,14 @@ function AdminApp() {
     if (session === undefined) return;
     if (!session) { setReady(true); return; }
     (async () => {
-      const [m, p, c, o, cc, cl, ss] = await Promise.all([
+      const [m, p, c, o, cc, cl, ss, bi, fi] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
         loadKey('customCategories'), loadKey('customColors'), loadKey('shopSettings', DEFAULT_SHOP_SETTINGS),
+        loadKey('bannerImages'), loadKey('feedbackImages'),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
       setCustomCategories(cc); setCustomColors(cl); setShopSettings({ ...DEFAULT_SHOP_SETTINGS, ...ss });
+      setBannerImages(bi); setFeedbackImages(fi);
       setReady(true);
     })();
   }, [session]);
@@ -464,6 +618,10 @@ function AdminApp() {
   const reorderCategories = (next) => { setCustomCategories(next); persist('customCategories', next); };
   const reorderColors = (next) => { setCustomColors(next); persist('customColors', next); };
   const saveShopSettings = (next) => { setShopSettings(next); persist('shopSettings', next); };
+  const addBannerImage = (url) => { const next = [...bannerImages, url]; setBannerImages(next); persist('bannerImages', next); };
+  const removeBannerImage = (idx) => { const next = bannerImages.filter((_, i) => i !== idx); setBannerImages(next); persist('bannerImages', next); };
+  const addFeedbackImage = (url) => { const next = [...feedbackImages, url]; setFeedbackImages(next); persist('feedbackImages', next); };
+  const removeFeedbackImage = (idx) => { const next = feedbackImages.filter((_, i) => i !== idx); setFeedbackImages(next); persist('feedbackImages', next); };
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
@@ -586,12 +744,21 @@ function AdminApp() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: '#8A8574' }}>{session.user?.email}</span>
             <Btn onClick={() => setSettingsOpen(true)}>Cài đặt shop</Btn>
+            <Btn onClick={() => setImagesOpen(true)}>Ảnh trang chủ</Btn>
             <Btn onClick={exportExcel}><Download size={14} /> Xuất Excel</Btn>
             <Btn onClick={() => auth.signOut()}>Đăng xuất</Btn>
           </div>
         </header>
         {settingsOpen && (
           <ShopSettingsModal settings={shopSettings} onSave={(s) => { saveShopSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />
+        )}
+        {imagesOpen && (
+          <SiteImagesModal
+            bannerImages={bannerImages} feedbackImages={feedbackImages}
+            onAddBanner={addBannerImage} onRemoveBanner={removeBannerImage}
+            onAddFeedback={addFeedbackImage} onRemoveFeedback={removeFeedbackImage}
+            onClose={() => setImagesOpen(false)}
+          />
         )}
 
         <nav style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E3DFD3', marginBottom: 20, overflowX: 'auto' }}>
@@ -1280,6 +1447,100 @@ function ShopSettingsModal({ settings, onSave, onClose }) {
   );
 }
 
+function SiteImagesModal({ bannerImages, feedbackImages, onAddBanner, onRemoveBanner, onAddFeedback, onRemoveFeedback, onClose }) {
+  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [uploadingFeedback, setUploadingFeedback] = useState(false);
+
+  const handleBannerFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingBanner(true);
+    try {
+      const url = await storage.uploadImage(file);
+      onAddBanner(url);
+    } catch (err) {
+      console.error('Lỗi tải ảnh banner', err);
+    } finally {
+      setUploadingBanner(false);
+    }
+  };
+
+  const handleFeedbackFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingFeedback(true);
+    try {
+      const url = await storage.uploadImage(file);
+      onAddFeedback(url);
+    } catch (err) {
+      console.error('Lỗi tải ảnh feedback', err);
+    } finally {
+      setUploadingFeedback(false);
+    }
+  };
+
+  const thumbStyle = { position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid #E3DFD3', background: '#EFEBDE' };
+  const removeBtnStyle = { position: 'absolute', top: 3, right: 3, background: 'rgba(30,26,18,0.75)', border: 'none', borderRadius: 5, color: '#fff', cursor: 'pointer', padding: 3, display: 'flex' };
+
+  return (
+    <Modal title="Ảnh trang chủ (Menu khách xem)" onClose={onClose} width={480}>
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 4 }}>Ảnh banner (trình chiếu ở đầu trang)</div>
+        <div style={{ fontSize: 11.5, color: '#8A8574', marginBottom: 8 }}>Nên dùng ảnh ngang (VD: 1200x500) để hiển thị đẹp nhất.</div>
+        {bannerImages.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8, marginBottom: 10 }}>
+            {bannerImages.map((url, i) => (
+              <div key={i} style={{ ...thumbStyle, aspectRatio: '16 / 9' }}>
+                <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <button onClick={() => onRemoveBanner(i)} style={removeBtnStyle}><X size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+          padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+          cursor: uploadingBanner ? 'default' : 'pointer', opacity: uploadingBanner ? 0.6 : 1,
+        }}>
+          <ImageIcon size={14} />
+          {uploadingBanner ? 'Đang tải...' : 'Thêm ảnh banner'}
+          <input type="file" accept="image/*" onChange={handleBannerFile} disabled={uploadingBanner} style={{ display: 'none' }} />
+        </label>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1E2A38', marginBottom: 4 }}>Ảnh feedback khách hàng</div>
+        <div style={{ fontSize: 11.5, color: '#8A8574', marginBottom: 8 }}>Ảnh khách nhận hàng thật, tin nhắn khen... để tăng độ tin cậy.</div>
+        {feedbackImages.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8, marginBottom: 10 }}>
+            {feedbackImages.map((url, i) => (
+              <div key={i} style={{ ...thumbStyle, aspectRatio: '1 / 1' }}>
+                <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <button onClick={() => onRemoveFeedback(i)} style={removeBtnStyle}><X size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+          padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+          cursor: uploadingFeedback ? 'default' : 'pointer', opacity: uploadingFeedback ? 0.6 : 1,
+        }}>
+          <ImageIcon size={14} />
+          {uploadingFeedback ? 'Đang tải...' : 'Thêm ảnh feedback'}
+          <input type="file" accept="image/*" onChange={handleFeedbackFile} disabled={uploadingFeedback} style={{ display: 'none' }} />
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+        <Btn onClick={onClose}>Đóng</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, categories, colors, onAddCategory, onAddColor }) {
   const [form, setForm] = useState(data);
   const [uploading, setUploading] = useState(false);
@@ -1543,9 +1804,9 @@ async function downloadImage(url, filename) {
 
 const MENU_PAGE_SIZE = 25;
 
-function MenuTab({ products, computeProductCost, categories, colors }) {
+function MenuTab({ products, computeProductCost, categories, colors, initialCategory }) {
   const [search, setSearch] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
+  const [filterCategory, setFilterCategory] = useState(initialCategory || '');
   const [filterColors, setFilterColors] = useState([]);
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
