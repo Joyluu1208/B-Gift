@@ -530,6 +530,8 @@ function PublicMenuApp() {
 }
 
 const DEFAULT_SHOP_SETTINGS = { logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' };
+const DEFAULT_MATERIAL_UNITS = ['Hộp', 'Bịch', 'Cái', 'Kg', 'Gam', 'Lít', 'Mét'];
+const DEFAULT_MATERIAL_CATEGORIES = ['Sữa', 'Bánh', 'Phụ kiện', 'Gấu bông'];
 
 function AdminApp() {
   const [ready, setReady] = useState(false);
@@ -546,6 +548,8 @@ function AdminApp() {
   const [bannerImages, setBannerImages] = useState([]);
   const [feedbackImages, setFeedbackImages] = useState([]);
   const [imagesOpen, setImagesOpen] = useState(false);
+  const [materialUnits, setMaterialUnits] = useState(DEFAULT_MATERIAL_UNITS);
+  const [materialCategories, setMaterialCategories] = useState(DEFAULT_MATERIAL_CATEGORIES);
 
   useEffect(() => {
     auth.getSession().then(setSession);
@@ -557,14 +561,16 @@ function AdminApp() {
     if (session === undefined) return;
     if (!session) { setReady(true); return; }
     (async () => {
-      const [m, p, c, o, cc, cl, ss, bi, fi] = await Promise.all([
+      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
         loadKey('customCategories'), loadKey('customColors'), loadKey('shopSettings', DEFAULT_SHOP_SETTINGS),
         loadKey('bannerImages'), loadKey('feedbackImages'),
+        loadKey('materialUnits', DEFAULT_MATERIAL_UNITS), loadKey('materialCategories', DEFAULT_MATERIAL_CATEGORIES),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
       setCustomCategories(cc); setCustomColors(cl); setShopSettings({ ...DEFAULT_SHOP_SETTINGS, ...ss });
       setBannerImages(bi); setFeedbackImages(fi);
+      setMaterialUnits(mu); setMaterialCategories(mc);
       setReady(true);
     })();
   }, [session]);
@@ -622,6 +628,8 @@ function AdminApp() {
   const removeBannerImage = (idx) => { const next = bannerImages.filter((_, i) => i !== idx); setBannerImages(next); persist('bannerImages', next); };
   const addFeedbackImage = (url) => { const next = [...feedbackImages, url]; setFeedbackImages(next); persist('feedbackImages', next); };
   const removeFeedbackImage = (idx) => { const next = feedbackImages.filter((_, i) => i !== idx); setFeedbackImages(next); persist('feedbackImages', next); };
+  const saveMaterialUnits = (next) => { setMaterialUnits(next); persist('materialUnits', next); };
+  const saveMaterialCategories = (next) => { setMaterialCategories(next); persist('materialCategories', next); };
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
@@ -785,7 +793,9 @@ function AdminApp() {
             <Dashboard orders={orders} customers={customers} products={products} orderTotal={orderTotal} customerMap={customerMap} />
           )}
           {tab === 'materials' && (
-            <MaterialsTab materials={materials} saveMaterials={saveMaterials} />
+            <MaterialsTab materials={materials} saveMaterials={saveMaterials}
+              units={materialUnits} categories={materialCategories}
+              onSaveUnits={saveMaterialUnits} onSaveCategories={saveMaterialCategories} />
           )}
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
@@ -889,12 +899,112 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
   );
 }
 
-function MaterialsTab({ materials, saveMaterials }) {
+function EditableStringListModal({ title, items, onSave, onClose }) {
+  const [list, setList] = useState(items);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+
+  const commit = (next) => { setList(next); onSave(next); };
+
+  const confirmAdd = () => {
+    const name = newName.trim();
+    if (name) commit([...list, name]);
+    setAdding(false); setNewName('');
+  };
+  const startEdit = (i) => { setEditingIdx(i); setEditName(list[i]); };
+  const confirmEdit = () => {
+    const name = editName.trim();
+    if (name) commit(list.map((x, i) => (i === editingIdx ? name : x)));
+    setEditingIdx(null);
+  };
+  const removeItem = (i) => commit(list.filter((_, idx) => idx !== i));
+
+  const dropAt = (targetIdx, sourceFromEvent) => {
+    const source = dragIdx !== null ? dragIdx : sourceFromEvent;
+    if (source === null || source === undefined || source === '' || Number(source) === targetIdx) { setDragOverIdx(null); return; }
+    const srcIdx = Number(source);
+    const next = [...list];
+    const [moved] = next.splice(srcIdx, 1);
+    next.splice(targetIdx, 0, moved);
+    commit(next);
+    setDragIdx(null); setDragOverIdx(null);
+  };
+
+  return (
+    <Modal title={title} onClose={onClose} width={380}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+        {list.map((item, i) => (
+          <div key={i} style={{
+            padding: '6px 10px', background: '#F2EFE6', borderRadius: 6,
+            opacity: dragIdx === i ? 0.4 : 1, border: dragOverIdx === i ? '2px dashed #1E2A38' : '2px dashed transparent',
+          }}
+            onDragOver={(e) => { e.preventDefault(); setDragOverIdx(i); }}
+            onDragLeave={() => setDragOverIdx((cur) => (cur === i ? null : cur))}
+            onDrop={(e) => { e.preventDefault(); dropAt(i, e.dataTransfer.getData('text/plain')); }}
+          >
+            {editingIdx === i ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ ...inputStyle, padding: '5px 8px' }} value={editName} autoFocus
+                  onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') confirmEdit(); }} />
+                <button onClick={confirmEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5C7A5E' }}><Check size={16} /></button>
+                <button onClick={() => setEditingIdx(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8574' }}><X size={16} /></button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span
+                    draggable
+                    onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); setDragIdx(i); }}
+                    onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+                    title="Kéo để đổi vị trí"
+                    style={{ cursor: 'grab', display: 'flex', color: '#B8B3A2' }}
+                  >
+                    <GripVertical size={14} />
+                  </span>
+                  <span style={{ fontSize: 13 }}>{item}</span>
+                </span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button onClick={() => startEdit(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759' }}><Pencil size={13} /></button>
+                  <button onClick={() => removeItem(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={13} /></button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        {list.length === 0 && <div style={{ fontSize: 12.5, color: '#8A8574' }}>Chưa có mục nào.</div>}
+      </div>
+
+      {adding ? (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          <input style={inputStyle} autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
+            placeholder="Tên mục mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmAdd(); } }} />
+          <Btn variant="primary" onClick={confirmAdd} style={{ flex: '0 0 auto' }}>OK</Btn>
+          <Btn onClick={() => setAdding(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+        </div>
+      ) : (
+        <Btn onClick={() => setAdding(true)} style={{ marginBottom: 12 }}><Plus size={13} /> Thêm mục mới</Btn>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Btn onClick={onClose}>Đóng</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits, onSaveCategories }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
+  const [previewImage, setPreviewImage] = useState(null);
+  const [managingUnits, setManagingUnits] = useState(false);
+  const [managingCategories, setManagingCategories] = useState(false);
   const filtered = materials.filter((m) => matchesSearch(m.name, search));
 
-  const openNew = () => setEditing({ id: uid(), name: '', unit: '', unitPrice: 0, note: '', imageUrl: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', unit: '', category: '', unitPrice: 0, note: '', imageUrl: '' });
 
   const submit = (data) => {
     const exists = materials.some((m) => m.id === data.id);
@@ -912,7 +1022,11 @@ function MaterialsTab({ materials, saveMaterials }) {
           <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
           <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm vật liệu..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Btn onClick={() => setManagingUnits(true)}>Quản lý đơn vị</Btn>
+          <Btn onClick={() => setManagingCategories(true)}>Quản lý phân loại</Btn>
+          <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -921,18 +1035,21 @@ function MaterialsTab({ materials, saveMaterials }) {
         </Card>
       ) : (
         <Card style={{ overflow: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '44px 1.6fr 0.8fr 1fr 1.6fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 640 }}>
-            <div></div><div>Tên vật liệu</div><div>Đơn vị</div><div>Giá vốn</div><div>Ghi chú</div><div></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '44px 1.5fr 0.9fr 0.8fr 1fr 1.3fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 720 }}>
+            <div></div><div>Tên vật liệu</div><div>Phân loại</div><div>Đơn vị</div><div>Giá vốn</div><div>Ghi chú</div><div></div>
           </div>
           {filtered.map((m, i) => (
             <div key={m.id} style={{
-              display: 'grid', gridTemplateColumns: '44px 1.6fr 0.8fr 1fr 1.6fr auto', padding: '10px 16px', alignItems: 'center',
-              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 640,
+              display: 'grid', gridTemplateColumns: '44px 1.5fr 0.9fr 0.8fr 1fr 1.3fr auto', padding: '10px 16px', alignItems: 'center',
+              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 720,
             }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 6, overflow: 'hidden', background: '#EFEBDE', border: '1px solid #E3DFD3',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
+              <div
+                onClick={() => m.imageUrl && setPreviewImage(m)}
+                style={{
+                  width: 32, height: 32, borderRadius: 6, overflow: 'hidden', background: '#EFEBDE', border: '1px solid #E3DFD3',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: m.imageUrl ? 'pointer' : 'default',
+                }}
+              >
                 {m.imageUrl ? (
                   <img src={m.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} />
                 ) : (
@@ -940,6 +1057,7 @@ function MaterialsTab({ materials, saveMaterials }) {
                 )}
               </div>
               <div style={{ fontWeight: 600 }}>{m.name}</div>
+              <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.category}</div>
               <div style={{ color: '#6B6759' }}>{m.unit}</div>
               <div><Money value={m.unitPrice} size={12.5} /></div>
               <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.note}</div>
@@ -954,16 +1072,65 @@ function MaterialsTab({ materials, saveMaterials }) {
 
       {editing && (
         <Modal title={materials.some((m) => m.id === editing.id) ? 'Sửa vật liệu' : 'Thêm vật liệu'} onClose={() => setEditing(null)}>
-          <MaterialForm data={editing} onSubmit={submit} onCancel={() => setEditing(null)} />
+          <MaterialForm data={editing} onSubmit={submit} onCancel={() => setEditing(null)} units={units} categories={categories}
+            onAddUnit={(name) => onSaveUnits([...units, name])} onAddCategory={(name) => onSaveCategories([...categories, name])} />
+        </Modal>
+      )}
+
+      {managingUnits && (
+        <EditableStringListModal title="Quản lý đơn vị" items={units} onSave={onSaveUnits} onClose={() => setManagingUnits(false)} />
+      )}
+      {managingCategories && (
+        <EditableStringListModal title="Quản lý phân loại vật liệu" items={categories} onSave={onSaveCategories} onClose={() => setManagingCategories(false)} />
+      )}
+
+      {previewImage && (
+        <Modal title={previewImage.name} onClose={() => setPreviewImage(null)} width={420}>
+          <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#EFEBDE', aspectRatio: '1 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img src={previewImage.imageUrl} alt={previewImage.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <button
+              onClick={() => downloadImage(previewImage.imageUrl, `${previewImage.name || 'vat-lieu'}.jpg`)}
+              title="Tải ảnh về máy"
+              style={{
+                position: 'absolute', bottom: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6,
+                background: 'rgba(30,42,56,0.85)', color: '#fff', border: 'none', borderRadius: 6,
+                padding: '7px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <Download size={14} /> Tải ảnh về
+            </button>
+          </div>
         </Modal>
       )}
     </div>
   );
 }
 
-function MaterialForm({ data, onSubmit, onCancel }) {
+function MaterialForm({ data, onSubmit, onCancel, units, categories, onAddUnit, onAddCategory }) {
   const [form, setForm] = useState(data);
   const [uploading, setUploading] = useState(false);
+  const [addingUnit, setAddingUnit] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  const confirmNewUnit = () => {
+    const name = newUnitName.trim();
+    if (!name) { setAddingUnit(false); return; }
+    onAddUnit(name);
+    setForm({ ...form, unit: name });
+    setAddingUnit(false);
+    setNewUnitName('');
+  };
+
+  const confirmNewCategory = () => {
+    const name = newCategoryName.trim();
+    if (!name) { setAddingCategory(false); return; }
+    onAddCategory(name);
+    setForm({ ...form, category: name });
+    setAddingCategory(false);
+    setNewCategoryName('');
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files[0];
@@ -1020,10 +1187,50 @@ function MaterialForm({ data, onSubmit, onCancel }) {
 
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
-          <Field label="Đơn vị">
-            <input style={inputStyle} value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="kg, m, cái..." />
+          <Field label="Phân loại">
+            {addingCategory ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={inputStyle} autoFocus value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Tên phân loại mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewCategory(); } }} />
+                <Btn type="button" variant="primary" onClick={confirmNewCategory} style={{ flex: '0 0 auto' }}>OK</Btn>
+                <Btn type="button" onClick={() => setAddingCategory(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+              </div>
+            ) : (
+              <select style={inputStyle} value={form.category || ''} onChange={(e) => {
+                if (e.target.value === '__new__') { setAddingCategory(true); return; }
+                setForm({ ...form, category: e.target.value });
+              }}>
+                <option value="">— Chọn phân loại —</option>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__new__">+ Thêm phân loại mới...</option>
+              </select>
+            )}
           </Field>
         </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Đơn vị">
+            {addingUnit ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={inputStyle} autoFocus value={newUnitName} onChange={(e) => setNewUnitName(e.target.value)}
+                  placeholder="Tên đơn vị mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewUnit(); } }} />
+                <Btn type="button" variant="primary" onClick={confirmNewUnit} style={{ flex: '0 0 auto' }}>OK</Btn>
+                <Btn type="button" onClick={() => setAddingUnit(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+              </div>
+            ) : (
+              <select style={inputStyle} value={form.unit || ''} onChange={(e) => {
+                if (e.target.value === '__new__') { setAddingUnit(true); return; }
+                setForm({ ...form, unit: e.target.value });
+              }}>
+                <option value="">— Chọn đơn vị —</option>
+                {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                <option value="__new__">+ Thêm đơn vị mới...</option>
+              </select>
+            )}
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <Field label="Giá vốn (đ)">
             <input style={inputStyle} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
