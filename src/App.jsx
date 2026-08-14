@@ -650,8 +650,8 @@ function AdminApp() {
     const wb = XLSX.utils.book_new();
 
     const matSheet = materials.map((m) => ({
-      'Tên vật liệu': m.name, 'Đơn vị': m.unit, 'SL tồn': Number(m.stockQty || 0),
-      'Đơn giá': Number(m.unitPrice || 0), 'Thành tiền': Number(m.stockQty || 0) * Number(m.unitPrice || 0),
+      'Tên vật liệu': m.name, 'Đơn vị': m.unit,
+      'Giá vốn': Number(m.unitPrice || 0),
       'Ghi chú': m.note || '',
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matSheet), 'Vật liệu');
@@ -893,9 +893,8 @@ function MaterialsTab({ materials, saveMaterials }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const filtered = materials.filter((m) => matchesSearch(m.name, search));
-  const totalStockValue = materials.reduce((s, m) => s + Number(m.stockQty || 0) * Number(m.unitPrice || 0), 0);
 
-  const openNew = () => setEditing({ id: uid(), name: '', unit: '', unitPrice: 0, stockQty: 0, note: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', unit: '', unitPrice: 0, note: '', imageUrl: '' });
 
   const submit = (data) => {
     const exists = materials.some((m) => m.id === data.id);
@@ -916,32 +915,33 @@ function MaterialsTab({ materials, saveMaterials }) {
         <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
       </div>
 
-      {materials.length > 0 && (
-        <Card style={{ padding: '10px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 13, color: '#6B6759', fontWeight: 600 }}>Tổng giá trị tồn kho</span>
-          <Money value={totalStockValue} size={15} bold />
-        </Card>
-      )}
-
       {filtered.length === 0 ? (
         <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>
           {materials.length === 0 ? 'Chưa có vật liệu nào. Thêm vật liệu để bắt đầu tính giá vốn sản phẩm.' : 'Không tìm thấy vật liệu phù hợp.'}
         </Card>
       ) : (
         <Card style={{ overflow: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 0.9fr 1fr 1.1fr 1.4fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 720 }}>
-            <div>Tên vật liệu</div><div>Đơn vị</div><div>SL tồn</div><div>Đơn giá</div><div>Thành tiền</div><div>Ghi chú</div><div></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '44px 1.6fr 0.8fr 1fr 1.6fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 640 }}>
+            <div></div><div>Tên vật liệu</div><div>Đơn vị</div><div>Giá vốn</div><div>Ghi chú</div><div></div>
           </div>
           {filtered.map((m, i) => (
             <div key={m.id} style={{
-              display: 'grid', gridTemplateColumns: '1.6fr 0.7fr 0.9fr 1fr 1.1fr 1.4fr auto', padding: '10px 16px', alignItems: 'center',
-              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 720,
+              display: 'grid', gridTemplateColumns: '44px 1.6fr 0.8fr 1fr 1.6fr auto', padding: '10px 16px', alignItems: 'center',
+              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 640,
             }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 6, overflow: 'hidden', background: '#EFEBDE', border: '1px solid #E3DFD3',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {m.imageUrl ? (
+                  <img src={m.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} />
+                ) : (
+                  <ImageIcon size={14} color="#B8B3A2" />
+                )}
+              </div>
               <div style={{ fontWeight: 600 }}>{m.name}</div>
               <div style={{ color: '#6B6759' }}>{m.unit}</div>
-              <div style={{ color: Number(m.stockQty) <= 0 ? '#A8493F' : '#232019', fontWeight: 600 }}>{m.stockQty || 0}</div>
               <div><Money value={m.unitPrice} size={12.5} /></div>
-              <div><Money value={Number(m.stockQty || 0) * Number(m.unitPrice || 0)} size={12.5} bold /></div>
               <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.note}</div>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button onClick={() => setEditing(m)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
@@ -963,12 +963,61 @@ function MaterialsTab({ materials, saveMaterials }) {
 
 function MaterialForm({ data, onSubmit, onCancel }) {
   const [form, setForm] = useState(data);
-  const thanhTien = Number(form.stockQty || 0) * Number(form.unitPrice || 0);
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await storage.uploadImage(file);
+      setForm((f) => ({ ...f, imageUrl: url }));
+    } catch (err) {
+      console.error('Lỗi tải ảnh lên', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!form.name.trim()) return; onSubmit(form); }}>
       <Field label="Tên vật liệu">
-        <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VD: Thép hộp 20x20" autoFocus />
+        <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VD: Bánh Hello Panda" autoFocus />
       </Field>
+
+      <Field label="Ảnh vật liệu">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{
+            flex: '0 0 56px', width: 56, height: 56, borderRadius: 8, overflow: 'hidden',
+            background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {form.imageUrl ? (
+              <img src={form.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <ImageIcon size={20} color="#B8B3A2" />
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+              padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+              cursor: uploading ? 'default' : 'pointer', color: '#232019', opacity: uploading ? 0.6 : 1, width: 'fit-content',
+            }}>
+              <ImageIcon size={14} />
+              {uploading ? 'Đang xử lý...' : form.imageUrl ? 'Đổi ảnh khác' : 'Chọn ảnh từ máy'}
+              <input type="file" accept="image/*" onChange={handleFile} disabled={uploading} style={{ display: 'none' }} />
+            </label>
+            {form.imageUrl && !uploading && (
+              <button type="button" onClick={() => setForm((f) => ({ ...f, imageUrl: '' }))}
+                style={{ background: 'none', border: 'none', color: '#A8493F', fontSize: 12, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
+                Xoá ảnh
+              </button>
+            )}
+          </div>
+        </div>
+      </Field>
+
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <Field label="Đơn vị">
@@ -976,24 +1025,17 @@ function MaterialForm({ data, onSubmit, onCancel }) {
           </Field>
         </div>
         <div style={{ flex: 1 }}>
-          <Field label="Số lượng tồn (nhập)">
-            <input style={inputStyle} type="number" min="0" step="0.01" value={form.stockQty || 0} onChange={(e) => setForm({ ...form, stockQty: Number(e.target.value) })} />
+          <Field label="Giá vốn (đ)">
+            <input style={inputStyle} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
           </Field>
         </div>
       </div>
-      <Field label="Đơn giá nhập (đ)">
-        <input style={inputStyle} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
-      </Field>
       <Field label="Ghi chú">
         <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Nhà cung cấp, quy cách..." />
       </Field>
-      <div style={{ background: '#EFEBDE', borderRadius: 8, padding: '10px 14px', marginBottom: 4, display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
-        <span>Thành tiền (tồn kho)</span>
-        <Money value={thanhTien} size={14} bold />
-      </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
         <Btn onClick={onCancel}>Huỷ</Btn>
-        <Btn variant="primary" type="submit"><Save size={14} /> Lưu</Btn>
+        <Btn variant="primary" type="submit" disabled={uploading}><Save size={14} /> Lưu</Btn>
       </div>
     </form>
   );
