@@ -287,7 +287,7 @@ function computeProductCostFor(prod, materialMap) {
     const m = materialMap[mi.materialId];
     return sum + (m ? m.unitPrice * mi.qty : 0);
   }, 0);
-  const cost = matCost + Number(prod.laborCost || 0);
+  const cost = matCost + Number(prod.laborCost || 0) + Number(prod.decorationCost || 0);
   // Lợi nhuận tính trên giá bán (margin): 50% lợi nhuận = giá bán gấp đôi giá vốn.
   const profitPct = Math.min(99, Math.max(0, Number(prod.profitPct || 0)));
   const sell = cost / (1 - profitPct / 100);
@@ -649,7 +649,7 @@ function AdminApp() {
       const m = materialMap[mi.materialId];
       return sum + (m ? m.unitPrice * mi.qty : 0);
     }, 0);
-    const cost = matCost + Number(prod.laborCost || 0);
+    const cost = matCost + Number(prod.laborCost || 0) + Number(prod.decorationCost || 0);
     const profitPct = Math.min(99, Math.max(0, Number(prod.profitPct || 0)));
     const sell = cost / (1 - profitPct / 100);
     return { cost, sell };
@@ -674,6 +674,7 @@ function AdminApp() {
         'Chế độ giá': p.manualPrice ? 'Nhập tay' : 'Tính theo vật liệu',
         'Giá vốn': cost == null ? '' : Math.round(cost),
         'Giá bán': Math.round(sell),
+        'Tiền trang trí': Number(p.decorationCost || 0),
         'Chi phí công': Number(p.laborCost || 0),
         'Lợi nhuận %': Number(p.profitPct || 0),
       };
@@ -1316,7 +1317,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     setDragOverId(null);
   };
 
-  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '', description: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', laborCost: 0, decorationCost: 0, profitPct: 20, materials: [], imageUrl: '', manualPrice: false, manualSellPrice: 0, category: '', color: '', description: '' });
 
   const submit = (data) => {
     const exists = products.some((p) => p.id === data.id);
@@ -1434,7 +1435,7 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
                           </table>
                         )}
                         <div style={{ marginTop: 8, color: '#8A8574', fontSize: 12.5 }}>
-                          Chi phí công: <Money value={p.laborCost} size={12} /> · Lợi nhuận: {p.profitPct}%
+                          Tiền trang trí: <Money value={p.decorationCost || 0} size={12} /> · Chi phí công: <Money value={p.laborCost} size={12} /> · Lợi nhuận: {p.profitPct}%
                         </div>
                       </>
                     )}
@@ -1993,15 +1994,24 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, 
 
           <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>
+              <Field label="Tiền trang trí (đ)">
+                <input style={inputStyle} type="number" min="0" value={form.decorationCost || 0} onChange={(e) => setForm({ ...form, decorationCost: Number(e.target.value) })} />
+              </Field>
+            </div>
+            <div style={{ flex: 1 }}>
               <Field label="Chi phí công (đ)">
                 <input style={inputStyle} type="number" min="0" value={form.laborCost} onChange={(e) => setForm({ ...form, laborCost: Number(e.target.value) })} />
               </Field>
             </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>
               <Field label="Lợi nhuận trên giá bán (%)">
                 <input style={inputStyle} type="number" min="0" max="99" value={form.profitPct} onChange={(e) => setForm({ ...form, profitPct: Math.min(99, Number(e.target.value)) })} />
               </Field>
             </div>
+            <div style={{ flex: 1 }} />
           </div>
         </>
       )}
