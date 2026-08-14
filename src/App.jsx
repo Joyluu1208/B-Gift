@@ -221,12 +221,12 @@ function Modal({ title, onClose, children, width = 480 }) {
   );
 }
 
-async function loadKey(key) {
+async function loadKey(key, fallback = []) {
   try {
     const r = await storage.get(key);
-    return r ? JSON.parse(r.value) : [];
+    return r ? JSON.parse(r.value) : fallback;
   } catch {
-    return [];
+    return fallback;
   }
 }
 
@@ -298,13 +298,15 @@ function PublicMenuApp() {
   const [products, setProducts] = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
   const [customColors, setCustomColors] = useState([]);
+  const [shopSettings, setShopSettings] = useState({ logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' });
 
   useEffect(() => {
     (async () => {
-      const [m, p, cc, cl] = await Promise.all([
+      const [m, p, cc, cl, ss] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customCategories'), loadKey('customColors'),
+        loadKey('shopSettings', { logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' }),
       ]);
-      setMaterials(m); setProducts(p); setCustomCategories(cc); setCustomColors(cl);
+      setMaterials(m); setProducts(p); setCustomCategories(cc); setCustomColors(cl); setShopSettings(ss);
       setReady(true);
     })();
   }, []);
@@ -322,25 +324,63 @@ function PublicMenuApp() {
     );
   }
 
+  const zaloDigits = (shopSettings.zalo || '').replace(/[^0-9]/g, '');
+  const phoneDigits = (shopSettings.phone || '').replace(/[^0-9]/g, '');
+
   return (
     <div style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', background: '#F2EFE6', minHeight: '100vh', color: '#232019' }}>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 16px' }}>
-        <header style={{ padding: '24px 0 16px', borderBottom: '2px solid #1E2A38' }}>
-          <h1 style={{
-            margin: 0, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 24,
-            fontWeight: 700, color: '#1E2A38', letterSpacing: '-0.01em',
-          }}>
-            Bơ Gift Biên Hòa
-          </h1>
-          <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>Bảng giá sản phẩm</span>
+        <header style={{ padding: '24px 0 16px', borderBottom: '2px solid #1E2A38', display: 'flex', alignItems: 'center', gap: 12 }}>
+          {shopSettings.logoUrl && (
+            <img src={shopSettings.logoUrl} alt="Logo" style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover', border: '1px solid #E3DFD3' }} />
+          )}
+          <div>
+            <h1 style={{
+              margin: 0, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 24,
+              fontWeight: 700, color: '#1E2A38', letterSpacing: '-0.01em',
+            }}>
+              Bơ Gift Biên Hòa
+            </h1>
+            <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>Bảng giá sản phẩm</span>
+            {shopSettings.address && <div style={{ fontSize: 11.5, color: '#8A8574' }}>{shopSettings.address}</div>}
+          </div>
         </header>
-        <main style={{ paddingTop: 20, paddingBottom: 60 }}>
+        <main style={{ paddingTop: 20, paddingBottom: 100 }}>
           <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
         </main>
+      </div>
+
+      <div style={{ position: 'fixed', right: 16, bottom: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 40 }}>
+        {zaloDigits && (
+          <a href={`https://zalo.me/${zaloDigits}`} target="_blank" rel="noreferrer" title="Chat Zalo"
+            style={{ width: 50, height: 50, borderRadius: '50%', background: '#0068FF', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 12, fontWeight: 800, textDecoration: 'none' }}>
+            Zalo
+          </a>
+        )}
+        {shopSettings.facebook && (
+          <a href={shopSettings.facebook} target="_blank" rel="noreferrer" title="Facebook"
+            style={{ width: 50, height: 50, borderRadius: '50%', background: '#1877F2', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 11, fontWeight: 800, textDecoration: 'none' }}>
+            FB
+          </a>
+        )}
+        {shopSettings.messenger && (
+          <a href={shopSettings.messenger} target="_blank" rel="noreferrer" title="Nhắn tin Messenger"
+            style={{ width: 50, height: 50, borderRadius: '50%', background: 'linear-gradient(135deg,#00B2FF,#A033FF,#FF5280)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 10.5, fontWeight: 800, textDecoration: 'none', textAlign: 'center', lineHeight: 1.1 }}>
+            Nhắn tin
+          </a>
+        )}
+        {phoneDigits && (
+          <a href={`tel:${phoneDigits}`} title="Gọi ngay"
+            style={{ width: 50, height: 50, borderRadius: '50%', background: '#5C7A5E', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', fontSize: 11, fontWeight: 800, textDecoration: 'none' }}>
+            Gọi
+          </a>
+        )}
       </div>
     </div>
   );
 }
+
+const DEFAULT_SHOP_SETTINGS = { logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' };
 
 function AdminApp() {
   const [ready, setReady] = useState(false);
@@ -352,6 +392,8 @@ function AdminApp() {
   const [orders, setOrders] = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
   const [customColors, setCustomColors] = useState([]);
+  const [shopSettings, setShopSettings] = useState(DEFAULT_SHOP_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     auth.getSession().then(setSession);
@@ -363,12 +405,12 @@ function AdminApp() {
     if (session === undefined) return;
     if (!session) { setReady(true); return; }
     (async () => {
-      const [m, p, c, o, cc, cl] = await Promise.all([
+      const [m, p, c, o, cc, cl, ss] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
-        loadKey('customCategories'), loadKey('customColors'),
+        loadKey('customCategories'), loadKey('customColors'), loadKey('shopSettings', DEFAULT_SHOP_SETTINGS),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
-      setCustomCategories(cc); setCustomColors(cl);
+      setCustomCategories(cc); setCustomColors(cl); setShopSettings({ ...DEFAULT_SHOP_SETTINGS, ...ss });
       setReady(true);
     })();
   }, [session]);
@@ -421,6 +463,7 @@ function AdminApp() {
   };
   const reorderCategories = (next) => { setCustomCategories(next); persist('customCategories', next); };
   const reorderColors = (next) => { setCustomColors(next); persist('customColors', next); };
+  const saveShopSettings = (next) => { setShopSettings(next); persist('shopSettings', next); };
   const allCategories = [...PRODUCT_CATEGORIES, ...customCategories];
   const allColors = [...PRODUCT_COLORS, ...customColors];
   const saveOrders = (d) => { setOrders(d); persist('orders', d); };
@@ -524,23 +567,32 @@ function AdminApp() {
     <div style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif', background: '#F2EFE6', minHeight: '100vh', color: '#232019' }}>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 16px' }}>
         <header style={{ padding: '24px 0 16px', borderBottom: '2px solid #1E2A38', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <h1 style={{
-              margin: 0, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 26,
-              fontWeight: 700, color: '#1E2A38', letterSpacing: '-0.01em',
-            }}>
-              Sổ Sách Kinh Doanh
-            </h1>
-            <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>
-              Bơ Gift Biên Hòa
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {shopSettings.logoUrl && (
+              <img src={shopSettings.logoUrl} alt="Logo" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid #E3DFD3' }} />
+            )}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+              <h1 style={{
+                margin: 0, fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 26,
+                fontWeight: 700, color: '#1E2A38', letterSpacing: '-0.01em',
+              }}>
+                Sổ Sách Kinh Doanh
+              </h1>
+              <span style={{ fontSize: 12.5, color: '#8A8574', fontStyle: 'italic' }}>
+                Bơ Gift Biên Hòa
+              </span>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: '#8A8574' }}>{session.user?.email}</span>
+            <Btn onClick={() => setSettingsOpen(true)}>Cài đặt shop</Btn>
             <Btn onClick={exportExcel}><Download size={14} /> Xuất Excel</Btn>
             <Btn onClick={() => auth.signOut()}>Đăng xuất</Btn>
           </div>
         </header>
+        {settingsOpen && (
+          <ShopSettingsModal settings={shopSettings} onSave={(s) => { saveShopSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />
+        )}
 
         <nav style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E3DFD3', marginBottom: 20, overflowX: 'auto' }}>
           {NAV.map(({ key, label, icon: Icon }) => (
@@ -1144,6 +1196,86 @@ function ManageCategoriesColorsModal({ customCategories, customColors, onRemoveC
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
         <Btn onClick={onClose}>Đóng</Btn>
       </div>
+    </Modal>
+  );
+}
+
+function ShopSettingsModal({ settings, onSave, onClose }) {
+  const [form, setForm] = useState(settings);
+  const [uploading, setUploading] = useState(false);
+
+  const handleLogoFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await storage.uploadImage(file);
+      setForm((f) => ({ ...f, logoUrl: url }));
+    } catch (err) {
+      console.error('Lỗi tải logo lên', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Modal title="Cài đặt shop" onClose={onClose} width={440}>
+      <form onSubmit={(e) => { e.preventDefault(); onSave(form); }}>
+        <Field label="Logo shop">
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{
+              flex: '0 0 56px', width: 56, height: 56, borderRadius: 8, overflow: 'hidden',
+              background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {form.logoUrl ? (
+                <img src={form.logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <ImageIcon size={22} color="#B8B3A2" />
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+                padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+                cursor: uploading ? 'default' : 'pointer', color: '#232019', opacity: uploading ? 0.6 : 1, width: 'fit-content',
+              }}>
+                <ImageIcon size={14} />
+                {uploading ? 'Đang xử lý...' : form.logoUrl ? 'Đổi logo khác' : 'Tải logo lên'}
+                <input type="file" accept="image/*" onChange={handleLogoFile} disabled={uploading} style={{ display: 'none' }} />
+              </label>
+              {form.logoUrl && !uploading && (
+                <button type="button" onClick={() => setForm((f) => ({ ...f, logoUrl: '' }))}
+                  style={{ background: 'none', border: 'none', color: '#A8493F', fontSize: 12, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
+                  Xoá logo
+                </button>
+              )}
+            </div>
+          </div>
+        </Field>
+        <Field label="Số điện thoại / Hotline">
+          <input style={inputStyle} value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="09xxxxxxxx" />
+        </Field>
+        <Field label="Số Zalo (để khách bấm Chat Zalo)">
+          <input style={inputStyle} value={form.zalo || ''} onChange={(e) => setForm({ ...form, zalo: e.target.value })} placeholder="09xxxxxxxx" />
+        </Field>
+        <Field label="Link Facebook (trang/fanpage)">
+          <input style={inputStyle} value={form.facebook || ''} onChange={(e) => setForm({ ...form, facebook: e.target.value })} placeholder="https://facebook.com/..." />
+        </Field>
+        <Field label="Link Messenger (m.me/...)">
+          <input style={inputStyle} value={form.messenger || ''} onChange={(e) => setForm({ ...form, messenger: e.target.value })} placeholder="https://m.me/TenShopCuaBan" />
+        </Field>
+        <Field label="Địa chỉ">
+          <input style={inputStyle} value={form.address || ''} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Địa chỉ cửa hàng" />
+        </Field>
+        <div style={{ fontSize: 11.5, color: '#8A8574', marginBottom: 4 }}>
+          Số điện thoại, Zalo, Facebook sẽ hiện thành các nút liên hệ nhanh ở góc màn hình Menu sản phẩm cho khách bấm ngay.
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <Btn onClick={onClose}>Huỷ</Btn>
+          <Btn variant="primary" type="submit" disabled={uploading}><Save size={14} /> Lưu</Btn>
+        </div>
+      </form>
     </Modal>
   );
 }
