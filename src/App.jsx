@@ -534,6 +534,8 @@ function PublicMenuApp() {
 const DEFAULT_SHOP_SETTINGS = { logoUrl: '', phone: '', zalo: '', facebook: '', messenger: '', address: '' };
 const DEFAULT_MATERIAL_UNITS = ['Hộp', 'Bịch', 'Cái', 'Kg', 'Gam', 'Lít', 'Mét'];
 const DEFAULT_MATERIAL_CATEGORIES = ['Sữa', 'Bánh', 'Phụ kiện', 'Gấu bông'];
+const DEFAULT_DELIVERY_METHODS = ['Khách tự lấy', 'Giao tận nơi', 'Ship COD'];
+const DEFAULT_SHIPPING_CARRIERS = ['GHN', 'GHTK', 'Ahamove', 'Grab', 'Ninja Van', 'Tự giao'];
 
 function AdminApp() {
   const [ready, setReady] = useState(false);
@@ -554,6 +556,8 @@ function AdminApp() {
   const [materialCategories, setMaterialCategories] = useState(DEFAULT_MATERIAL_CATEGORIES);
   const [materialRestocks, setMaterialRestocks] = useState([]);
   const [teamResources, setTeamResources] = useState({ rulesText: '', rulesImageUrl: '', qrImages: [], links: [] });
+  const [deliveryMethods, setDeliveryMethods] = useState(DEFAULT_DELIVERY_METHODS);
+  const [shippingCarriers, setShippingCarriers] = useState(DEFAULT_SHIPPING_CARRIERS);
 
   useEffect(() => {
     auth.getSession().then(setSession);
@@ -565,19 +569,21 @@ function AdminApp() {
     if (session === undefined) return;
     if (!session) { setReady(true); return; }
     (async () => {
-      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc, mr, tr] = await Promise.all([
+      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc, mr, tr, dm, sc] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
         loadKey('customCategories'), loadKey('customColors'), loadKey('shopSettings', DEFAULT_SHOP_SETTINGS),
         loadKey('bannerImages'), loadKey('feedbackImages'),
         loadKey('materialUnits', DEFAULT_MATERIAL_UNITS), loadKey('materialCategories', DEFAULT_MATERIAL_CATEGORIES),
         loadKey('materialRestocks'),
         loadKey('teamResources', { rulesText: '', rulesImageUrl: '', qrImages: [], links: [] }),
+        loadKey('deliveryMethods', DEFAULT_DELIVERY_METHODS), loadKey('shippingCarriers', DEFAULT_SHIPPING_CARRIERS),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
       setCustomCategories(cc); setCustomColors(cl); setShopSettings({ ...DEFAULT_SHOP_SETTINGS, ...ss });
       setBannerImages(bi); setFeedbackImages(fi);
       setMaterialUnits(mu); setMaterialCategories(mc); setMaterialRestocks(mr);
       setTeamResources(tr);
+      setDeliveryMethods(dm); setShippingCarriers(sc);
       setReady(true);
     })();
   }, [session]);
@@ -600,6 +606,18 @@ function AdminApp() {
     setMaterials(nextMaterials); persist('materials', nextMaterials);
   };
   const saveTeamResources = (next) => { setTeamResources(next); persist('teamResources', next); };
+  const addDeliveryMethod = (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed || deliveryMethods.includes(trimmed)) return;
+    const next = [...deliveryMethods, trimmed];
+    setDeliveryMethods(next); persist('deliveryMethods', next);
+  };
+  const addShippingCarrier = (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed || shippingCarriers.includes(trimmed)) return;
+    const next = [...shippingCarriers, trimmed];
+    setShippingCarriers(next); persist('shippingCarriers', next);
+  };
   const addCategory = (name) => {
     const trimmed = (name || '').trim();
     if (!trimmed || PRODUCT_CATEGORIES.includes(trimmed) || customCategories.includes(trimmed)) return;
@@ -714,7 +732,7 @@ function AdminApp() {
         'Mã đơn': o.orderCode || '', 'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName, 'Nguồn': custSource,
         'Trạng thái': STATUS.find((s) => s.key === o.status)?.label || o.status,
         'Sản phẩm': itemsText, 'Tổng tiền': total, 'Phí ship': Number(o.shippingFee || 0),
-        'Hoa hồng': Number(o.commission || 0), 'Đã cọc': Number(o.depositAmount || 0),
+        'Đã cọc': Number(o.depositAmount || 0),
         'Còn phải thu': remain > 0 ? remain : 0,
         'Hình thức giao': o.deliveryMethod || '', 'ĐV vận chuyển': o.shippingCarrier || '',
         'Mã vận đơn': o.trackingCode || '', 'Nội dung in': o.printRequest || '', 'Ghi chú': o.note || '',
@@ -834,7 +852,9 @@ function AdminApp() {
           {tab === 'orders' && (
             <OrdersTab orders={orders} saveOrders={saveOrders} customers={customers} products={products}
               customerMap={customerMap} productMap={productMap} computeProductCost={computeProductCost} orderTotal={orderTotal}
-              materials={materials} saveMaterials={saveMaterials} />
+              materials={materials} saveMaterials={saveMaterials}
+              deliveryMethods={deliveryMethods} shippingCarriers={shippingCarriers}
+              onAddDeliveryMethod={addDeliveryMethod} onAddShippingCarrier={addShippingCarrier} />
           )}
         </main>
       </div>
@@ -2941,7 +2961,7 @@ function CustomerForm({ data, onSubmit, onCancel }) {
   );
 }
 
-function OrdersTab({ orders, saveOrders, customers, products, customerMap, productMap, computeProductCost, orderTotal, materials, saveMaterials }) {
+function OrdersTab({ orders, saveOrders, customers, products, customerMap, productMap, computeProductCost, orderTotal, materials, saveMaterials, deliveryMethods, shippingCarriers, onAddDeliveryMethod, onAddShippingCarrier }) {
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [onlyUnpaid, setOnlyUnpaid] = useState(false);
@@ -2952,7 +2972,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
   const openNew = () => setEditing({
     id: uid(), orderCode: '', customerId: customers[0]?.id || '', customerName: '', source: '', orderDate: todayStr(), deliveryDate: '',
     status: 'moi', note: '', items: [], shippingFee: 0, depositAmount: 0,
-    deliveryMethod: '', shippingCarrier: '', trackingCode: '', commission: 0, printRequest: '',
+    deliveryMethod: '', shippingCarrier: '', trackingCode: '', printRequest: '',
   });
 
   const submit = (data) => {
@@ -3062,7 +3082,6 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
 
   <div class="total-box">
     ${row('Phí ship', Number(o.shippingFee) > 0 ? fmtVND(o.shippingFee) : '')}
-    ${row('Hoa hồng', Number(o.commission) > 0 ? '-' + fmtVND(o.commission) : '')}
     ${row('Đã cọc', Number(o.depositAmount) > 0 ? fmtVND(o.depositAmount) : '')}
     <div class="total-final"><span>Tổng tiền đơn hàng</span><span>${fmtVND(total)}</span></div>
     ${Number(o.depositAmount) > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:${remain > 0 ? '#7A4A16' : '#2F5233'};margin-top:4px;">
@@ -3195,12 +3214,6 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
                       <span>{fmtVND(o.shippingFee)}</span>
                     </div>
                   )}
-                  {Number(o.commission) > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                      <span>Hoa hồng</span>
-                      <span>-{fmtVND(o.commission)}</span>
-                    </div>
-                  )}
                 </div>
               )}
               {o.printRequest && <div style={{ marginTop: 6, fontSize: 12, color: '#6B6759' }}>In: {o.printRequest}</div>}
@@ -3212,20 +3225,41 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
 
       {editing && (
         <Modal title={orders.some((o) => o.id === editing.id) ? 'Sửa đơn hàng' : 'Tạo đơn hàng'} onClose={() => setEditing(null)} width={640}>
-          <OrderForm data={editing} customers={customers} products={products} materials={materials} computeProductCost={computeProductCost} onSubmit={submit} onCancel={() => setEditing(null)} />
+          <OrderForm data={editing} customers={customers} products={products} materials={materials} computeProductCost={computeProductCost} onSubmit={submit} onCancel={() => setEditing(null)}
+            deliveryMethods={deliveryMethods} shippingCarriers={shippingCarriers} onAddDeliveryMethod={onAddDeliveryMethod} onAddShippingCarrier={onAddShippingCarrier} />
         </Modal>
       )}
     </div>
   );
 }
 
-function OrderForm({ data, customers, products, materials, computeProductCost, onSubmit, onCancel }) {
+function OrderForm({ data, customers, products, materials, computeProductCost, onSubmit, onCancel, deliveryMethods, shippingCarriers, onAddDeliveryMethod, onAddShippingCarrier }) {
   const [form, setForm] = useState(data);
   const [expandedMaterials, setExpandedMaterials] = useState(null);
+  const [addingDeliveryMethod, setAddingDeliveryMethod] = useState(false);
+  const [newDeliveryMethod, setNewDeliveryMethod] = useState('');
+  const [addingCarrier, setAddingCarrier] = useState(false);
+  const [newCarrier, setNewCarrier] = useState('');
   const itemsTotal = (form.items || []).reduce((s, it) => s + it.price * it.qty, 0);
   const total = itemsTotal + Number(form.shippingFee || 0);
-  const revenue = total - Number(form.commission || 0);
   const isKnownOrderSource = !form.source || CUSTOMER_SOURCES.includes(form.source);
+
+  const confirmNewDeliveryMethod = () => {
+    const name = newDeliveryMethod.trim();
+    if (!name) { setAddingDeliveryMethod(false); return; }
+    onAddDeliveryMethod(name);
+    setForm({ ...form, deliveryMethod: name });
+    setAddingDeliveryMethod(false);
+    setNewDeliveryMethod('');
+  };
+  const confirmNewCarrier = () => {
+    const name = newCarrier.trim();
+    if (!name) { setAddingCarrier(false); return; }
+    onAddShippingCarrier(name);
+    setForm({ ...form, shippingCarrier: name });
+    setAddingCarrier(false);
+    setNewCarrier('');
+  };
 
   const addProductItem = () => {
     if (products.length === 0) return;
@@ -3405,12 +3439,44 @@ function OrderForm({ data, customers, products, materials, computeProductCost, o
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <Field label="Hình thức giao hàng">
-            <input style={inputStyle} value={form.deliveryMethod || ''} onChange={(e) => setForm({ ...form, deliveryMethod: e.target.value })} placeholder="Ship COD, tự giao, khách tự lấy..." />
+            {addingDeliveryMethod ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={inputStyle} autoFocus value={newDeliveryMethod} onChange={(e) => setNewDeliveryMethod(e.target.value)}
+                  placeholder="Hình thức mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewDeliveryMethod(); } }} />
+                <Btn type="button" variant="primary" onClick={confirmNewDeliveryMethod} style={{ flex: '0 0 auto' }}>OK</Btn>
+                <Btn type="button" onClick={() => setAddingDeliveryMethod(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+              </div>
+            ) : (
+              <select style={inputStyle} value={form.deliveryMethod || ''} onChange={(e) => {
+                if (e.target.value === '__new__') { setAddingDeliveryMethod(true); return; }
+                setForm({ ...form, deliveryMethod: e.target.value });
+              }}>
+                <option value="">— Chọn hình thức —</option>
+                {deliveryMethods.map((d) => <option key={d} value={d}>{d}</option>)}
+                <option value="__new__">+ Thêm hình thức mới...</option>
+              </select>
+            )}
           </Field>
         </div>
         <div style={{ flex: 1 }}>
           <Field label="Đơn vị vận chuyển">
-            <input style={inputStyle} value={form.shippingCarrier || ''} onChange={(e) => setForm({ ...form, shippingCarrier: e.target.value })} placeholder="GHN, GHTK, Ahamove..." />
+            {addingCarrier ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={inputStyle} autoFocus value={newCarrier} onChange={(e) => setNewCarrier(e.target.value)}
+                  placeholder="Đơn vị mới" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewCarrier(); } }} />
+                <Btn type="button" variant="primary" onClick={confirmNewCarrier} style={{ flex: '0 0 auto' }}>OK</Btn>
+                <Btn type="button" onClick={() => setAddingCarrier(false)} style={{ flex: '0 0 auto' }}><X size={14} /></Btn>
+              </div>
+            ) : (
+              <select style={inputStyle} value={form.shippingCarrier || ''} onChange={(e) => {
+                if (e.target.value === '__new__') { setAddingCarrier(true); return; }
+                setForm({ ...form, shippingCarrier: e.target.value });
+              }}>
+                <option value="">— Chọn đơn vị —</option>
+                {shippingCarriers.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__new__">+ Thêm đơn vị mới...</option>
+              </select>
+            )}
           </Field>
         </div>
       </div>
@@ -3422,18 +3488,9 @@ function OrderForm({ data, customers, products, materials, computeProductCost, o
         <input style={inputStyle} value={form.printRequest || ''} onChange={(e) => setForm({ ...form, printRequest: e.target.value })} placeholder="Nội dung thiệp, tag cần in..." />
       </Field>
 
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Phí ship (đ)">
-            <input style={inputStyle} type="number" min="0" value={form.shippingFee || 0} onChange={(e) => setForm({ ...form, shippingFee: Number(e.target.value) })} />
-          </Field>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Field label="Hoa hồng (đ)">
-            <input style={inputStyle} type="number" min="0" value={form.commission || 0} onChange={(e) => setForm({ ...form, commission: Number(e.target.value) })} />
-          </Field>
-        </div>
-      </div>
+      <Field label="Phí ship (đ)">
+        <input style={inputStyle} type="number" min="0" value={form.shippingFee || 0} onChange={(e) => setForm({ ...form, shippingFee: Number(e.target.value) })} />
+      </Field>
 
       <Field label="Khách đã cọc (đ)">
         <div style={{ display: 'flex', gap: 6 }}>
@@ -3462,27 +3519,13 @@ function OrderForm({ data, customers, products, materials, computeProductCost, o
           <span>Tổng tiền đơn hàng</span>
           <Money value={total} size={15} bold />
         </div>
-        {Number(form.commission || 0) > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#8A8574', marginBottom: 4 }}>
-            <span>Hoa hồng</span><span>-{fmtVND(form.commission)}</span>
-          </div>
-        )}
-        {Number(form.commission || 0) > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, color: '#2F5233', marginBottom: 4 }}>
-            <span>Doanh thu thực nhận</span><span>{fmtVND(revenue)}</span>
-          </div>
-        )}
-        {Number(form.depositAmount || 0) > 0 && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#5C7A5E', marginTop: 6 }}>
-              <span>Đã cọc</span><span>{fmtVND(form.depositAmount)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, color: total - form.depositAmount > 0 ? '#7A4A16' : '#2F5233' }}>
-              <span>{total - form.depositAmount > 0 ? 'Còn phải thu' : 'Đã thu đủ'}</span>
-              {total - form.depositAmount > 0 && <span>{fmtVND(total - form.depositAmount)}</span>}
-            </div>
-          </>
-        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#5C7A5E', marginTop: 6 }}>
+          <span>Đã cọc</span><span>{fmtVND(form.depositAmount || 0)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, fontWeight: 700, color: total - Number(form.depositAmount || 0) > 0 ? '#7A4A16' : '#2F5233', paddingTop: 4, borderTop: '1px dashed #D7D2C2', marginTop: 2 }}>
+          <span>{total - Number(form.depositAmount || 0) > 0 ? 'Còn phải thu' : 'Đã thu đủ'}</span>
+          <span>{fmtVND(Math.max(0, total - Number(form.depositAmount || 0)))}</span>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
