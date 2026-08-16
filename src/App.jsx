@@ -553,6 +553,7 @@ function AdminApp() {
   const [materialUnits, setMaterialUnits] = useState(DEFAULT_MATERIAL_UNITS);
   const [materialCategories, setMaterialCategories] = useState(DEFAULT_MATERIAL_CATEGORIES);
   const [materialRestocks, setMaterialRestocks] = useState([]);
+  const [teamResources, setTeamResources] = useState({ rulesText: '', rulesImageUrl: '', qrImages: [], links: [] });
 
   useEffect(() => {
     auth.getSession().then(setSession);
@@ -564,17 +565,19 @@ function AdminApp() {
     if (session === undefined) return;
     if (!session) { setReady(true); return; }
     (async () => {
-      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc, mr] = await Promise.all([
+      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc, mr, tr] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
         loadKey('customCategories'), loadKey('customColors'), loadKey('shopSettings', DEFAULT_SHOP_SETTINGS),
         loadKey('bannerImages'), loadKey('feedbackImages'),
         loadKey('materialUnits', DEFAULT_MATERIAL_UNITS), loadKey('materialCategories', DEFAULT_MATERIAL_CATEGORIES),
         loadKey('materialRestocks'),
+        loadKey('teamResources', { rulesText: '', rulesImageUrl: '', qrImages: [], links: [] }),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
       setCustomCategories(cc); setCustomColors(cl); setShopSettings({ ...DEFAULT_SHOP_SETTINGS, ...ss });
       setBannerImages(bi); setFeedbackImages(fi);
       setMaterialUnits(mu); setMaterialCategories(mc); setMaterialRestocks(mr);
+      setTeamResources(tr);
       setReady(true);
     })();
   }, [session]);
@@ -596,6 +599,7 @@ function AdminApp() {
     const nextMaterials = materials.map((m) => (m.id === materialId ? { ...m, stockQty: Number(m.stockQty || 0) + Number(qty) } : m));
     setMaterials(nextMaterials); persist('materials', nextMaterials);
   };
+  const saveTeamResources = (next) => { setTeamResources(next); persist('teamResources', next); };
   const addCategory = (name) => {
     const trimmed = (name || '').trim();
     if (!trimmed || PRODUCT_CATEGORIES.includes(trimmed) || customCategories.includes(trimmed)) return;
@@ -804,7 +808,8 @@ function AdminApp() {
 
         <main style={{ paddingBottom: 60 }}>
           {tab === 'dashboard' && (
-            <Dashboard orders={orders} customers={customers} products={products} orderTotal={orderTotal} customerMap={customerMap} />
+            <Dashboard orders={orders} customers={customers} products={products} orderTotal={orderTotal} customerMap={customerMap}
+              teamResources={teamResources} onSaveTeamResources={saveTeamResources} />
           )}
           {tab === 'materials' && (
             <MaterialsTab materials={materials} saveMaterials={saveMaterials}
@@ -846,12 +851,13 @@ function StatCard({ label, value, accent }) {
   );
 }
 
-function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
+function Dashboard({ orders, customers, products, orderTotal, customerMap, teamResources, onSaveTeamResources }) {
   const thisMonth = new Date().toISOString().slice(0, 7);
   const monthOrders = orders.filter((o) => (o.orderDate || '').startsWith(thisMonth));
   const revenue = monthOrders.filter((o) => o.status !== 'huy').reduce((s, o) => s + orderTotal(o), 0);
   const pending = orders.filter((o) => o.status === 'moi' || o.status === 'dangLam').length;
   const recent = [...orders].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '')).slice(0, 6);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
 
   const monthlyRevenue = useMemo(() => {
     const now = new Date();
@@ -867,6 +873,16 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
       return { label, total };
     });
   }, [orders, orderTotal]);
+
+  const bySource = useMemo(() => {
+    const map = {};
+    customers.forEach((c) => {
+      const key = c.source && c.source.trim() ? c.source : '(Chưa rõ nguồn)';
+      map[key] = (map[key] || 0) + 1;
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }, [customers]);
+  const maxSourceCount = bySource.length > 0 ? bySource[0][1] : 1;
 
   return (
     <div>
@@ -891,6 +907,27 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
         </ResponsiveContainer>
       </Card>
 
+      <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Khách hàng theo nguồn</h3>
+      {bySource.length === 0 ? (
+        <Card style={{ padding: 20, color: '#8A8574', fontSize: 14, marginBottom: 24 }}>Chưa có khách hàng nào.</Card>
+      ) : (
+        <Card style={{ padding: '14px 16px', marginBottom: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {bySource.map(([source, count]) => (
+              <div key={source}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 3 }}>
+                  <span style={{ color: '#232019', fontWeight: 600 }}>{source}</span>
+                  <span style={{ color: '#8A8574' }}>{count} khách</span>
+                </div>
+                <div style={{ height: 6, background: '#EFEBDE', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ width: `${(count / maxSourceCount) * 100}%`, height: '100%', background: '#B8763B', borderRadius: 4 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Đơn hàng gần đây</h3>
       {recent.length === 0 ? (
         <Card style={{ padding: 20, color: '#8A8574', fontSize: 14 }}>Chưa có đơn hàng nào. Vào tab "Đơn hàng" để tạo đơn đầu tiên.</Card>
@@ -913,7 +950,193 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap }) {
           ))}
         </Card>
       )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '24px 0 10px' }}>
+        <h3 style={{ fontSize: 15, color: '#1E2A38', margin: 0 }}>Tài nguyên & nội quy cho team</h3>
+        <Btn onClick={() => setResourcesOpen(true)}><Pencil size={13} /> Chỉnh sửa</Btn>
+      </div>
+      <Card style={{ padding: 16 }}>
+        {teamResources.rulesText && (
+          <p style={{ fontSize: 13.5, color: '#4A4638', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginTop: 0 }}>{teamResources.rulesText}</p>
+        )}
+        {teamResources.rulesImageUrl && (
+          <img src={teamResources.rulesImageUrl} alt="Nội quy" style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #E3DFD3', marginBottom: 14 }} />
+        )}
+        {(teamResources.links || []).length > 0 && (
+          <div style={{ marginBottom: (teamResources.qrImages || []).length > 0 ? 16 : 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#6B6759', marginBottom: 6 }}>Liên kết nhanh</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {teamResources.links.map((l) => (
+                <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={{
+                  fontSize: 13, color: '#3D6B8A', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  → {l.label || l.url}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+        {(teamResources.qrImages || []).length > 0 && (
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#6B6759', marginBottom: 8 }}>Mã QR</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 12 }}>
+              {teamResources.qrImages.map((q) => (
+                <div key={q.id} style={{ textAlign: 'center' }}>
+                  <img src={q.url} alt={q.label} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'contain', borderRadius: 8, border: '1px solid #E3DFD3', background: '#fff' }} />
+                  {q.label && <div style={{ fontSize: 11.5, color: '#8A8574', marginTop: 4 }}>{q.label}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {!teamResources.rulesText && !teamResources.rulesImageUrl && (teamResources.links || []).length === 0 && (teamResources.qrImages || []).length === 0 && (
+          <div style={{ fontSize: 13, color: '#8A8574' }}>Chưa có nội dung nào — bấm "Chỉnh sửa" để thêm nội quy, mã QR, hoặc link cho team.</div>
+        )}
+      </Card>
+
+      {resourcesOpen && (
+        <TeamResourcesModal resources={teamResources} onSave={(r) => { onSaveTeamResources(r); setResourcesOpen(false); }} onClose={() => setResourcesOpen(false)} />
+      )}
     </div>
+  );
+}
+
+function TeamResourcesModal({ resources, onSave, onClose }) {
+  const [form, setForm] = useState({ rulesText: '', rulesImageUrl: '', qrImages: [], links: [], ...resources });
+  const [uploadingRules, setUploadingRules] = useState(false);
+  const [uploadingQr, setUploadingQr] = useState(false);
+  const [newLinkLabel, setNewLinkLabel] = useState('');
+  const [newLinkUrl, setNewLinkUrl] = useState('');
+  const [newQrLabel, setNewQrLabel] = useState('');
+
+  const handleRulesImage = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingRules(true);
+    try {
+      const url = await storage.uploadImage(file);
+      setForm((f) => ({ ...f, rulesImageUrl: url }));
+    } catch (err) {
+      console.error('Lỗi tải ảnh nội quy', err);
+    } finally {
+      setUploadingRules(false);
+    }
+  };
+
+  const handleQrImage = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingQr(true);
+    try {
+      const url = await storage.uploadImage(file);
+      setForm((f) => ({ ...f, qrImages: [...(f.qrImages || []), { id: uid(), label: newQrLabel.trim(), url } ] }));
+      setNewQrLabel('');
+    } catch (err) {
+      console.error('Lỗi tải mã QR', err);
+    } finally {
+      setUploadingQr(false);
+    }
+  };
+
+  const removeQr = (id) => setForm((f) => ({ ...f, qrImages: f.qrImages.filter((q) => q.id !== id) }));
+
+  const addLink = () => {
+    if (!newLinkUrl.trim()) return;
+    setForm((f) => ({ ...f, links: [...(f.links || []), { id: uid(), label: newLinkLabel.trim(), url: newLinkUrl.trim() }] }));
+    setNewLinkLabel(''); setNewLinkUrl('');
+  };
+  const removeLink = (id) => setForm((f) => ({ ...f, links: f.links.filter((l) => l.id !== id) }));
+
+  return (
+    <Modal title="Tài nguyên & nội quy cho team" onClose={onClose} width={480}>
+      <Field label="Nội quy (dạng chữ)">
+        <textarea style={{ ...inputStyle, minHeight: 90, resize: 'vertical', fontFamily: 'inherit' }}
+          value={form.rulesText || ''} onChange={(e) => setForm({ ...form, rulesText: e.target.value })}
+          placeholder="VD: Giờ làm việc, quy trình nhận đơn, cách xử lý khiếu nại..." />
+      </Field>
+
+      <Field label="Ảnh nội quy (nếu có, VD: ảnh chụp bảng nội quy)">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{
+            flex: '0 0 56px', width: 56, height: 56, borderRadius: 8, overflow: 'hidden',
+            background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {form.rulesImageUrl ? (
+              <img src={form.rulesImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <ImageIcon size={20} color="#B8B3A2" />
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+              padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+              cursor: uploadingRules ? 'default' : 'pointer', opacity: uploadingRules ? 0.6 : 1, width: 'fit-content',
+            }}>
+              <ImageIcon size={14} />
+              {uploadingRules ? 'Đang tải...' : form.rulesImageUrl ? 'Đổi ảnh khác' : 'Tải ảnh lên'}
+              <input type="file" accept="image/*" onChange={handleRulesImage} disabled={uploadingRules} style={{ display: 'none' }} />
+            </label>
+            {form.rulesImageUrl && !uploadingRules && (
+              <button type="button" onClick={() => setForm((f) => ({ ...f, rulesImageUrl: '' }))}
+                style={{ background: 'none', border: 'none', color: '#A8493F', fontSize: 12, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
+                Xoá ảnh
+              </button>
+            )}
+          </div>
+        </div>
+      </Field>
+
+      <Field label="Liên kết nhanh (Google Maps, link Menu, nhóm Zalo...)">
+        {(form.links || []).map((l) => (
+          <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: '#F2EFE6', borderRadius: 6, marginBottom: 6 }}>
+            <span style={{ fontSize: 13 }}>{l.label || l.url}</span>
+            <button type="button" onClick={() => removeLink(l.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={13} /></button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input style={{ ...inputStyle, flex: 1 }} value={newLinkLabel} onChange={(e) => setNewLinkLabel(e.target.value)} placeholder="Tên (VD: Nhóm Zalo Ship)" />
+          <input style={{ ...inputStyle, flex: 2 }} value={newLinkUrl} onChange={(e) => setNewLinkUrl(e.target.value)} placeholder="https://..." />
+          <Btn type="button" onClick={addLink} style={{ flex: '0 0 auto' }}><Plus size={13} /></Btn>
+        </div>
+      </Field>
+
+      <Field label="Mã QR (Zalo, chuyển khoản...)">
+        {(form.qrImages || []).length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 8, marginBottom: 10 }}>
+            {form.qrImages.map((q) => (
+              <div key={q.id} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid #E3DFD3', background: '#fff' }}>
+                <img src={q.url} alt="" style={{ width: '100%', aspectRatio: '1/1', objectFit: 'contain' }} />
+                {q.label && <div style={{ fontSize: 10, color: '#8A8574', textAlign: 'center', padding: '2px 0' }}>{q.label}</div>}
+                <button type="button" onClick={() => removeQr(q.id)} style={{
+                  position: 'absolute', top: 3, right: 3, background: 'rgba(30,26,18,0.75)', border: 'none',
+                  borderRadius: 5, color: '#fff', cursor: 'pointer', padding: 3, display: 'flex',
+                }}><X size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input style={{ ...inputStyle, flex: 1 }} value={newQrLabel} onChange={(e) => setNewQrLabel(e.target.value)} placeholder="Tên mã QR (VD: Zalo shop)" />
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600,
+            padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff',
+            cursor: uploadingQr ? 'default' : 'pointer', opacity: uploadingQr ? 0.6 : 1, whiteSpace: 'nowrap',
+          }}>
+            <ImageIcon size={14} />
+            {uploadingQr ? 'Đang tải...' : 'Thêm ảnh QR'}
+            <input type="file" accept="image/*" onChange={handleQrImage} disabled={uploadingQr} style={{ display: 'none' }} />
+          </label>
+        </div>
+      </Field>
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+        <Btn onClick={onClose}>Huỷ</Btn>
+        <Btn variant="primary" onClick={() => onSave(form)} disabled={uploadingRules || uploadingQr}><Save size={14} /> Lưu</Btn>
+      </div>
+    </Modal>
   );
 }
 
