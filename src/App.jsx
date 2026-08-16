@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer, Phone, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer, Phone, MessageCircle, Warehouse } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
 import { storage, auth, notify } from './storage.js';
@@ -552,6 +552,7 @@ function AdminApp() {
   const [imagesOpen, setImagesOpen] = useState(false);
   const [materialUnits, setMaterialUnits] = useState(DEFAULT_MATERIAL_UNITS);
   const [materialCategories, setMaterialCategories] = useState(DEFAULT_MATERIAL_CATEGORIES);
+  const [materialRestocks, setMaterialRestocks] = useState([]);
 
   useEffect(() => {
     auth.getSession().then(setSession);
@@ -563,16 +564,17 @@ function AdminApp() {
     if (session === undefined) return;
     if (!session) { setReady(true); return; }
     (async () => {
-      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc] = await Promise.all([
+      const [m, p, c, o, cc, cl, ss, bi, fi, mu, mc, mr] = await Promise.all([
         loadKey('materials'), loadKey('products'), loadKey('customers'), loadKey('orders'),
         loadKey('customCategories'), loadKey('customColors'), loadKey('shopSettings', DEFAULT_SHOP_SETTINGS),
         loadKey('bannerImages'), loadKey('feedbackImages'),
         loadKey('materialUnits', DEFAULT_MATERIAL_UNITS), loadKey('materialCategories', DEFAULT_MATERIAL_CATEGORIES),
+        loadKey('materialRestocks'),
       ]);
       setMaterials(m); setProducts(p); setCustomers(c); setOrders(o);
       setCustomCategories(cc); setCustomColors(cl); setShopSettings({ ...DEFAULT_SHOP_SETTINGS, ...ss });
       setBannerImages(bi); setFeedbackImages(fi);
-      setMaterialUnits(mu); setMaterialCategories(mc);
+      setMaterialUnits(mu); setMaterialCategories(mc); setMaterialRestocks(mr);
       setReady(true);
     })();
   }, [session]);
@@ -587,6 +589,13 @@ function AdminApp() {
   const saveMaterials = (d) => { setMaterials(d); persist('materials', d); };
   const saveProducts = (d) => { setProducts(d); persist('products', d); };
   const saveCustomers = (d) => { setCustomers(d); persist('customers', d); };
+  const addRestock = (materialId, qty, unitPrice, date) => {
+    const entry = { id: uid(), materialId, qty: Number(qty), unitPrice: Number(unitPrice), totalCost: Number(qty) * Number(unitPrice), date };
+    const nextRestocks = [...materialRestocks, entry];
+    setMaterialRestocks(nextRestocks); persist('materialRestocks', nextRestocks);
+    const nextMaterials = materials.map((m) => (m.id === materialId ? { ...m, stockQty: Number(m.stockQty || 0) + Number(qty) } : m));
+    setMaterials(nextMaterials); persist('materials', nextMaterials);
+  };
   const addCategory = (name) => {
     const trimmed = (name || '').trim();
     if (!trimmed || PRODUCT_CATEGORIES.includes(trimmed) || customCategories.includes(trimmed)) return;
@@ -698,7 +707,7 @@ function AdminApp() {
       const total = orderTotal(o);
       const remain = total - Number(o.depositAmount || 0);
       return {
-        'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName, 'Nguồn': custSource,
+        'Mã đơn': o.orderCode || '', 'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName, 'Nguồn': custSource,
         'Trạng thái': STATUS.find((s) => s.key === o.status)?.label || o.status,
         'Sản phẩm': itemsText, 'Tổng tiền': total, 'Phí ship': Number(o.shippingFee || 0),
         'Hoa hồng': Number(o.commission || 0), 'Đã cọc': Number(o.depositAmount || 0),
@@ -715,6 +724,7 @@ function AdminApp() {
   const NAV = [
     { key: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
     { key: 'materials', label: 'Vật liệu', icon: Package },
+    { key: 'inventory', label: 'Tồn kho', icon: Warehouse },
     { key: 'products', label: 'Sản phẩm', icon: ShoppingBag },
     { key: 'menu', label: 'Menu sản phẩm', icon: ImageIcon },
     { key: 'customers', label: 'Khách hàng', icon: Users },
@@ -801,6 +811,9 @@ function AdminApp() {
               units={materialUnits} categories={materialCategories}
               onSaveUnits={saveMaterialUnits} onSaveCategories={saveMaterialCategories} />
           )}
+          {tab === 'inventory' && (
+            <InventoryTab materials={materials} restocks={materialRestocks} onAddRestock={addRestock} />
+          )}
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
               categories={allCategories} colors={allColors} onAddCategory={addCategory} onAddColor={addColor}
@@ -815,7 +828,8 @@ function AdminApp() {
           )}
           {tab === 'orders' && (
             <OrdersTab orders={orders} saveOrders={saveOrders} customers={customers} products={products}
-              customerMap={customerMap} productMap={productMap} computeProductCost={computeProductCost} orderTotal={orderTotal} />
+              customerMap={customerMap} productMap={productMap} computeProductCost={computeProductCost} orderTotal={orderTotal}
+              materials={materials} saveMaterials={saveMaterials} />
           )}
         </main>
       </div>
@@ -1000,15 +1014,234 @@ function EditableStringListModal({ title, items, onSave, onClose }) {
   );
 }
 
+function BulkPriceModal({ title, items, onApply, onClose }) {
+  const [selected, setSelected] = useState(new Set(items.map((i) => i.id)));
+  const [mode, setMode] = useState('percentUp');
+  const [amount, setAmount] = useState(0);
+  const [search, setSearch] = useState('');
+
+  const filtered = items.filter((i) => matchesSearch(i.label, search));
+
+  const toggle = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleAll = () => setSelected((prev) => (
+    filtered.every((i) => prev.has(i.id)) ? new Set([...prev].filter((id) => !filtered.some((i) => i.id === id))) : new Set([...prev, ...filtered.map((i) => i.id)])
+  ));
+
+  const computeNew = (current) => {
+    const a = Number(amount) || 0;
+    if (mode === 'percentUp') return current * (1 + a / 100);
+    if (mode === 'percentDown') return current * (1 - a / 100);
+    if (mode === 'amountUp') return current + a;
+    if (mode === 'amountDown') return current - a;
+    if (mode === 'setValue') return a;
+    return current;
+  };
+
+  const apply = () => {
+    const updates = items
+      .filter((i) => selected.has(i.id))
+      .map((i) => ({ id: i.id, newPrice: Math.max(0, Math.round(computeNew(i.currentPrice))) }));
+    onApply(updates);
+    onClose();
+  };
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((i) => selected.has(i.id));
+
+  return (
+    <Modal title={title} onClose={onClose} width={480}>
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
+        <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <select style={{ ...inputStyle, flex: 1 }} value={mode} onChange={(e) => setMode(e.target.value)}>
+          <option value="percentUp">Tăng theo %</option>
+          <option value="percentDown">Giảm theo %</option>
+          <option value="amountUp">Tăng số tiền cố định</option>
+          <option value="amountDown">Giảm số tiền cố định</option>
+          <option value="setValue">Đặt giá trị cụ thể (áp dụng cho tất cả mục chọn)</option>
+        </select>
+        <input style={{ ...inputStyle, width: 120 }} type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          placeholder={mode.includes('percent') ? '%' : 'đ'} />
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <button type="button" onClick={toggleAll} style={{ background: 'none', border: 'none', color: '#1E2A38', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+          {allFilteredSelected ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+        </button>
+        <span style={{ fontSize: 12, color: '#8A8574' }}>{selected.size} / {items.length} đã chọn</span>
+      </div>
+
+      <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+        {filtered.map((i) => {
+          const isSel = selected.has(i.id);
+          const newVal = computeNew(i.currentPrice);
+          return (
+            <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', background: '#F2EFE6', borderRadius: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={isSel} onChange={() => toggle(i.id)} />
+              <span style={{ flex: 1, fontSize: 13 }}>{i.label}</span>
+              <span style={{ fontSize: 12, color: '#8A8574' }}>{fmtVND(i.currentPrice)}</span>
+              <span style={{ fontSize: 12, color: '#B8B3A2' }}>→</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: isSel ? '#1E2A38' : '#B8B3A2' }}>{fmtVND(Math.max(0, newVal))}</span>
+            </label>
+          );
+        })}
+        {filtered.length === 0 && <div style={{ fontSize: 12.5, color: '#8A8574' }}>Không có mục nào.</div>}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <Btn onClick={onClose}>Huỷ</Btn>
+        <Btn variant="primary" onClick={apply} disabled={selected.size === 0}>Áp dụng cho {selected.size} mục</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function InventoryTab({ materials, restocks, onAddRestock }) {
+  const [restockingId, setRestockingId] = useState(null);
+  const [rQty, setRQty] = useState(1);
+  const [rPrice, setRPrice] = useState(0);
+  const [rDate, setRDate] = useState(todayStr());
+  const [search, setSearch] = useState('');
+  const thisMonth = todayStr().slice(0, 7);
+
+  const filtered = materials.filter((m) => matchesSearch(m.name, search));
+
+  const startRestock = (m) => {
+    setRestockingId(m.id);
+    setRQty(1);
+    setRPrice(m.unitPrice || 0);
+    setRDate(todayStr());
+  };
+
+  const confirmRestock = () => {
+    if (!rQty || rQty <= 0) { setRestockingId(null); return; }
+    onAddRestock(restockingId, rQty, rPrice, rDate);
+    setRestockingId(null);
+  };
+
+  const monthTotals = useMemo(() => {
+    const map = {};
+    let grandQty = 0, grandCost = 0;
+    restocks.filter((r) => r.date && r.date.startsWith(thisMonth)).forEach((r) => {
+      if (!map[r.materialId]) map[r.materialId] = { qty: 0, cost: 0 };
+      map[r.materialId].qty += r.qty;
+      map[r.materialId].cost += r.totalCost;
+      grandQty += r.qty;
+      grandCost += r.totalCost;
+    });
+    return { byMaterial: map, grandQty, grandCost };
+  }, [restocks, thisMonth]);
+
+  const recentRestocks = useMemo(() => {
+    return [...restocks].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 15);
+  }, [restocks]);
+
+  const materialMap = useMemo(() => Object.fromEntries(materials.map((m) => [m.id, m])), [materials]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <StatCard label="Đã nhập tháng này (SL)" value={monthTotals.grandQty} />
+        <StatCard label="Tổng tiền nhập tháng này" value={fmtVND(monthTotals.grandCost)} accent="#B8763B" />
+        <StatCard label="Vật liệu đã hết hàng" value={materials.filter((m) => Number(m.stockQty || 0) <= 0).length} accent="#A8493F" />
+      </div>
+
+      <div style={{ position: 'relative', marginBottom: 14, maxWidth: 320 }}>
+        <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
+        <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm vật liệu..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <Card style={{ padding: 24, textAlign: 'center', color: '#8A8574' }}>Chưa có vật liệu nào.</Card>
+      ) : (
+        <Card style={{ overflow: 'auto', marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.9fr 1fr 1.2fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 640 }}>
+            <div>Vật liệu</div><div>Tồn kho</div><div>Đã nhập tháng này</div><div>Tiền nhập tháng này</div><div></div>
+          </div>
+          {filtered.map((m, i) => {
+            const stock = Number(m.stockQty || 0);
+            const mt = monthTotals.byMaterial[m.id];
+            return (
+              <div key={m.id}>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1.6fr 0.9fr 1fr 1.2fr auto', padding: '10px 16px', alignItems: 'center',
+                  borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 640,
+                }}>
+                  <div style={{ fontWeight: 600 }}>{m.name}</div>
+                  <div style={{ fontWeight: 700, color: stock <= 0 ? '#A8493F' : stock < 5 ? '#B8763B' : '#2F5233' }}>
+                    {stock} {m.unit}
+                    {stock <= 0 && <span style={{ marginLeft: 6, fontSize: 10.5, border: '1px dashed #A8493F', borderRadius: 4, padding: '1px 5px' }}>HẾT HÀNG</span>}
+                  </div>
+                  <div style={{ color: '#6B6759' }}>{mt ? `${mt.qty} ${m.unit}` : '—'}</div>
+                  <div>{mt ? <Money value={mt.cost} size={12.5} /> : '—'}</div>
+                  <Btn onClick={() => startRestock(m)}><Plus size={13} /> Nhập kho</Btn>
+                </div>
+                {restockingId === m.id && (
+                  <div style={{ padding: '10px 16px 16px', background: '#F2EFE6', borderTop: '1px solid #E3DFD3', minWidth: 640 }}>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Số lượng nhập</label>
+                        <input style={{ ...inputStyle, width: 100 }} type="number" min="0.01" step="0.01" value={rQty} onChange={(e) => setRQty(Number(e.target.value))} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Đơn giá nhập (đ)</label>
+                        <input style={{ ...inputStyle, width: 130 }} type="number" min="0" value={rPrice} onChange={(e) => setRPrice(Number(e.target.value))} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Ngày nhập</label>
+                        <input style={{ ...inputStyle, width: 150 }} type="date" value={rDate} onChange={(e) => setRDate(e.target.value)} />
+                      </div>
+                      <Money value={rQty * rPrice} size={13} bold />
+                      <Btn variant="primary" onClick={confirmRestock}><Save size={13} /> Lưu nhập kho</Btn>
+                      <Btn onClick={() => setRestockingId(null)}>Huỷ</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Lịch sử nhập kho gần đây</h3>
+      {recentRestocks.length === 0 ? (
+        <Card style={{ padding: 20, color: '#8A8574', fontSize: 13.5 }}>Chưa có lần nhập kho nào.</Card>
+      ) : (
+        <Card style={{ overflow: 'hidden' }}>
+          {recentRestocks.map((r, i) => (
+            <div key={r.id} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 16px', borderBottom: i < recentRestocks.length - 1 ? '1px solid #EFEBDE' : 'none', fontSize: 13,
+            }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{materialMap[r.materialId]?.name || '(đã xoá)'}</div>
+                <div style={{ fontSize: 11.5, color: '#8A8574' }}>{r.date} · {r.qty} {materialMap[r.materialId]?.unit} × {fmtVND(r.unitPrice)}</div>
+              </div>
+              <Money value={r.totalCost} size={13} bold />
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits, onSaveCategories }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [previewImage, setPreviewImage] = useState(null);
   const [managingUnits, setManagingUnits] = useState(false);
   const [managingCategories, setManagingCategories] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const filtered = materials.filter((m) => matchesSearch(m.name, search));
 
-  const openNew = () => setEditing({ id: uid(), name: '', unit: '', category: '', unitPrice: 0, note: '', imageUrl: '' });
+  const openNew = () => setEditing({ id: uid(), name: '', unit: '', category: '', unitPrice: 0, note: '', imageUrl: '', stockQty: 0 });
 
   const submit = (data) => {
     const exists = materials.some((m) => m.id === data.id);
@@ -1018,6 +1251,11 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
   };
 
   const remove = (id) => saveMaterials(materials.filter((m) => m.id !== id));
+
+  const applyBulkPrices = (updates) => {
+    const map = Object.fromEntries(updates.map((u) => [u.id, u.newPrice]));
+    saveMaterials(materials.map((m) => (map[m.id] !== undefined ? { ...m, unitPrice: map[m.id] } : m)));
+  };
 
   return (
     <div>
@@ -1029,6 +1267,7 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Btn onClick={() => setManagingUnits(true)}>Quản lý đơn vị</Btn>
           <Btn onClick={() => setManagingCategories(true)}>Quản lý phân loại</Btn>
+          {materials.length > 0 && <Btn onClick={() => setBulkOpen(true)}>Sửa giá vốn hàng loạt</Btn>}
           <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
         </div>
       </div>
@@ -1086,6 +1325,14 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
       )}
       {managingCategories && (
         <EditableStringListModal title="Quản lý phân loại vật liệu" items={categories} onSave={onSaveCategories} onClose={() => setManagingCategories(false)} />
+      )}
+      {bulkOpen && (
+        <BulkPriceModal
+          title="Sửa giá vốn vật liệu hàng loạt"
+          items={materials.map((m) => ({ id: m.id, label: m.name, currentPrice: m.unitPrice || 0 }))}
+          onApply={applyBulkPrices}
+          onClose={() => setBulkOpen(false)}
+        />
       )}
 
       {previewImage && (
@@ -1240,6 +1487,14 @@ function MaterialForm({ data, onSubmit, onCancel, units, categories, onAddUnit, 
             <input style={inputStyle} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
           </Field>
         </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Tồn kho hiện tại (SL)">
+            <input style={inputStyle} type="number" value={form.stockQty || 0} onChange={(e) => setForm({ ...form, stockQty: Number(e.target.value) })} />
+          </Field>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: '#8A8574', marginTop: -8, marginBottom: 12 }}>
+        Nhập ở đây chỉ để chỉnh sửa/hiệu chỉnh nhanh — muốn ghi lại lịch sử nhập kho theo tháng, dùng tab "Tồn kho" → "Nhập kho".
       </div>
       <Field label="Ghi chú">
         <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Nhà cung cấp, quy cách..." />
@@ -1329,6 +1584,20 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
   const remove = (id) => saveProducts(products.filter((p) => p.id !== id));
 
   const [managing, setManaging] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  const applyBulkPrices = (updates) => {
+    const map = Object.fromEntries(updates.map((u) => [u.id, u.newPrice]));
+    saveProducts(products.map((p) => {
+      if (map[p.id] === undefined) return p;
+      const newPrice = map[p.id];
+      if (p.manualPrice) return { ...p, manualSellPrice: newPrice };
+      const { cost } = computeProductCost(p);
+      if (!cost || cost <= 0) return { ...p, manualPrice: true, manualSellPrice: newPrice };
+      const profitPct = Math.min(99, Math.max(0, (1 - cost / newPrice) * 100));
+      return { ...p, profitPct: Math.round(profitPct * 10) / 10 };
+    }));
+  };
 
   return (
     <div>
@@ -1337,8 +1606,9 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
           <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
           <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm sản phẩm theo tên..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Btn onClick={() => setManaging(true)}>Quản lý loại &amp; màu</Btn>
+          {products.length > 0 && <Btn onClick={() => setBulkOpen(true)}>Sửa giá bán hàng loạt</Btn>}
           <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
         </div>
       </div>
@@ -1461,6 +1731,14 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
           onEditCategory={onEditCategory} onEditColor={onEditColor}
           onReorderCategories={onReorderCategories} onReorderColors={onReorderColors}
           onClose={() => setManaging(false)}
+        />
+      )}
+      {bulkOpen && (
+        <BulkPriceModal
+          title="Sửa giá bán hàng loạt"
+          items={products.map((p) => ({ id: p.id, label: p.name, currentPrice: computeProductCost(p).sell || 0 }))}
+          onApply={applyBulkPrices}
+          onClose={() => setBulkOpen(false)}
         />
       )}
     </div>
@@ -2348,6 +2626,37 @@ const CUSTOMER_SOURCES = [
   'Khách liên hệ Zalo',
 ];
 
+const SOURCE_CODE_MAP = {
+  'Bách Hóa Nhà Bơ': 'BHNB',
+  'Bơ Gift': 'BG',
+  'Giỏ quà tết 3k follow': 'GQTBH',
+  'Giỏ quà tết 30k follow': 'GQTBH',
+  'Khách hàng cũ giới thiệu': 'KH',
+  'Khách cũ đã đặt hàng': 'KH',
+  'Khách liên hệ Zalo': 'ZL',
+};
+
+function sourceToCode(source) {
+  if (SOURCE_CODE_MAP[source]) return SOURCE_CODE_MAP[source];
+  if (!source) return 'KH';
+  // Nguồn tự thêm (không có sẵn trong bảng mã): lấy chữ cái đầu mỗi từ, tối đa 5 ký tự.
+  const letters = source
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd')
+    .split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).join('');
+  return (letters || 'KH').slice(0, 5);
+}
+
+function generateOrderCode(orderDate, source, existingCodes) {
+  const d = orderDate ? new Date(orderDate + 'T00:00:00') : new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const base = `KH${mm}${dd}${sourceToCode(source)}`;
+  if (!existingCodes.includes(base)) return base;
+  let n = 2;
+  while (existingCodes.includes(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
 function CustomerForm({ data, onSubmit, onCancel }) {
   const [form, setForm] = useState(data);
   const isKnownSource = !form.source || CUSTOMER_SOURCES.includes(form.source);
@@ -2409,7 +2718,7 @@ function CustomerForm({ data, onSubmit, onCancel }) {
   );
 }
 
-function OrdersTab({ orders, saveOrders, customers, products, customerMap, productMap, computeProductCost, orderTotal }) {
+function OrdersTab({ orders, saveOrders, customers, products, customerMap, productMap, computeProductCost, orderTotal, materials, saveMaterials }) {
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [onlyUnpaid, setOnlyUnpaid] = useState(false);
@@ -2418,21 +2727,48 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
   const sorted = [...filtered].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
 
   const openNew = () => setEditing({
-    id: uid(), customerId: customers[0]?.id || '', customerName: '', source: '', orderDate: todayStr(), deliveryDate: '',
+    id: uid(), orderCode: '', customerId: customers[0]?.id || '', customerName: '', source: '', orderDate: todayStr(), deliveryDate: '',
     status: 'moi', note: '', items: [], shippingFee: 0, depositAmount: 0,
     deliveryMethod: '', shippingCarrier: '', trackingCode: '', commission: 0, printRequest: '',
   });
 
   const submit = (data) => {
     const exists = orders.some((o) => o.id === data.id);
-    const next = exists ? orders.map((o) => (o.id === data.id ? data : o)) : [...orders, data];
+    let toSave = data;
+
+    if (!exists) {
+      // Sinh mã đơn hàng tự động: KH[MMDD][Mã nguồn], VD KH0816BG
+      const sourceLabel = customerMap[data.customerId]?.source || data.source || '';
+      const code = generateOrderCode(data.orderDate, sourceLabel, orders.map((o) => o.orderCode).filter(Boolean));
+      toSave = { ...data, orderCode: code };
+
+      // Tự trừ tồn kho vật liệu theo các sản phẩm trong đơn (bỏ qua dòng nhập tay).
+      const usage = {};
+      (toSave.items || []).forEach((it) => {
+        if (it.manual) return;
+        const matList = it.materialsOverride && it.materialsOverride.length > 0
+          ? it.materialsOverride
+          : (productMap[it.productId]?.materials || []);
+        matList.forEach((mi) => {
+          usage[mi.materialId] = (usage[mi.materialId] || 0) + Number(mi.qty || 0) * Number(it.qty || 0);
+        });
+      });
+      if (Object.keys(usage).length > 0) {
+        const nextMaterials = materials.map((m) => (
+          usage[m.id] ? { ...m, stockQty: Number(m.stockQty || 0) - usage[m.id] } : m
+        ));
+        saveMaterials(nextMaterials);
+      }
+    }
+
+    const next = exists ? orders.map((o) => (o.id === toSave.id ? toSave : o)) : [...orders, toSave];
     saveOrders(next);
     if (!exists) {
       notify.newOrder({
-        customerName: customerMap[data.customerId]?.name || data.customerName || '(Khách lẻ)',
-        orderDate: data.orderDate,
-        total: fmtVND(orderTotal(data)),
-        items: (data.items || []).map((it) => (it.manual ? it.name : (productMap[it.productId]?.name || ''))),
+        customerName: customerMap[toSave.customerId]?.name || toSave.customerName || '(Khách lẻ)',
+        orderDate: toSave.orderDate,
+        total: fmtVND(orderTotal(toSave)),
+        items: (toSave.items || []).map((it) => (it.manual ? it.name : (productMap[it.productId]?.name || ''))),
       });
     }
     setEditing(null);
@@ -2477,7 +2813,7 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
 </style></head>
 <body>
   <h1>Bơ Gift Biên Hòa</h1>
-  <div class="sub">Đơn hàng — In ngày ${todayStr()}</div>
+  <div class="sub">${o.orderCode ? `Mã đơn: <b>${o.orderCode}</b> — ` : ''}In ngày ${todayStr()}</div>
 
   <h2>Thông tin khách hàng</h2>
   ${row('Tên khách', custName)}
@@ -2555,7 +2891,15 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
             <Card key={o.id} style={{ padding: '12px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {o.orderCode && (
+                      <span style={{
+                        fontSize: 11.5, fontWeight: 700, color: '#1E2A38', fontFamily: 'ui-monospace, monospace',
+                        background: '#EFEBDE', border: '1px solid #D7D2C2', borderRadius: 4, padding: '1px 7px',
+                      }}>
+                        {o.orderCode}
+                      </span>
+                    )}
                     <span style={{ fontWeight: 700, fontSize: 14.5 }}>{customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)'}</span>
                     {(customerMap[o.customerId]?.source || o.source) && (
                       <span style={{ fontSize: 11, color: '#7A4A16', background: '#FBF0DE', border: '1px solid #E9D3AC', borderRadius: 4, padding: '1px 7px' }}>
@@ -2645,15 +2989,16 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
 
       {editing && (
         <Modal title={orders.some((o) => o.id === editing.id) ? 'Sửa đơn hàng' : 'Tạo đơn hàng'} onClose={() => setEditing(null)} width={640}>
-          <OrderForm data={editing} customers={customers} products={products} computeProductCost={computeProductCost} onSubmit={submit} onCancel={() => setEditing(null)} />
+          <OrderForm data={editing} customers={customers} products={products} materials={materials} computeProductCost={computeProductCost} onSubmit={submit} onCancel={() => setEditing(null)} />
         </Modal>
       )}
     </div>
   );
 }
 
-function OrderForm({ data, customers, products, computeProductCost, onSubmit, onCancel }) {
+function OrderForm({ data, customers, products, materials, computeProductCost, onSubmit, onCancel }) {
   const [form, setForm] = useState(data);
+  const [expandedMaterials, setExpandedMaterials] = useState(null);
   const itemsTotal = (form.items || []).reduce((s, it) => s + it.price * it.qty, 0);
   const total = itemsTotal + Number(form.shippingFee || 0);
   const revenue = total - Number(form.commission || 0);
@@ -2663,7 +3008,7 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
     if (products.length === 0) return;
     const p = products[0];
     const { sell } = computeProductCost(p);
-    setForm({ ...form, items: [...(form.items || []), { manual: false, productId: p.id, qty: 1, price: Math.round(sell) }] });
+    setForm({ ...form, items: [...(form.items || []), { manual: false, productId: p.id, qty: 1, price: Math.round(sell), materialsOverride: (p.materials || []).map((mi) => ({ ...mi })) }] });
   };
   const addManualItem = () => {
     setForm({ ...form, items: [...(form.items || []), { manual: true, name: '', qty: 1, price: 0 }] });
@@ -2673,7 +3018,7 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
     if (field === 'productId') {
       const p = products.find((x) => x.id === value);
       const { sell } = computeProductCost(p);
-      rows[idx] = { ...rows[idx], productId: value, price: Math.round(sell) };
+      rows[idx] = { ...rows[idx], productId: value, price: Math.round(sell), materialsOverride: (p.materials || []).map((mi) => ({ ...mi })) };
     } else if (field === 'name') {
       rows[idx] = { ...rows[idx], name: value };
     } else {
@@ -2682,6 +3027,26 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
     setForm({ ...form, items: rows });
   };
   const removeItem = (idx) => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+
+  const addOverrideMaterial = (idx) => {
+    if (materials.length === 0) return;
+    const rows = [...form.items];
+    const cur = rows[idx].materialsOverride || [];
+    rows[idx] = { ...rows[idx], materialsOverride: [...cur, { materialId: materials[0].id, qty: 1 }] };
+    setForm({ ...form, items: rows });
+  };
+  const updateOverrideMaterial = (idx, mIdx, field, value) => {
+    const rows = [...form.items];
+    const list = [...(rows[idx].materialsOverride || [])];
+    list[mIdx] = { ...list[mIdx], [field]: field === 'qty' ? Number(value) : value };
+    rows[idx] = { ...rows[idx], materialsOverride: list };
+    setForm({ ...form, items: rows });
+  };
+  const removeOverrideMaterial = (idx, mIdx) => {
+    const rows = [...form.items];
+    rows[idx] = { ...rows[idx], materialsOverride: (rows[idx].materialsOverride || []).filter((_, i) => i !== mIdx) };
+    setForm({ ...form, items: rows });
+  };
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!form.customerId && !form.customerName.trim()) return; onSubmit(form); }}>
@@ -2743,30 +3108,68 @@ function OrderForm({ data, customers, products, computeProductCost, onSubmit, on
       <Field label="Sản phẩm / nội dung trong đơn">
         {(form.items || []).map((it, idx) => {
           const selectedProduct = !it.manual ? products.find((p) => p.id === it.productId) : null;
+          const isExpanded = expandedMaterials === idx;
           return (
-            <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-              {!it.manual && (
-                <div style={{
-                  flex: '0 0 36px', width: 36, height: 36, borderRadius: 6, overflow: 'hidden',
-                  background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {selectedProduct?.imageUrl ? (
-                    <img src={selectedProduct.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div key={idx} style={{ marginBottom: 6 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {!it.manual && (
+                  <div style={{
+                    flex: '0 0 36px', width: 36, height: 36, borderRadius: 6, overflow: 'hidden',
+                    background: '#EFEBDE', border: '1px solid #D7D2C2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {selectedProduct?.imageUrl ? (
+                      <img src={selectedProduct.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <ImageIcon size={15} color="#B8B3A2" />
+                    )}
+                  </div>
+                )}
+                {it.manual ? (
+                  <input style={{ ...inputStyle, flex: 2 }} value={it.name} onChange={(e) => updateItem(idx, 'name', e.target.value)} placeholder="Tên/loại sản phẩm (nhập tay)" />
+                ) : (
+                  <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
+                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                )}
+                <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
+                <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
+                {!it.manual && (
+                  <button type="button" onClick={() => setExpandedMaterials(isExpanded ? null : idx)} title="Xem/sửa vật liệu dùng cho dòng này"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: isExpanded ? '#1E2A38' : '#6B6759' }}>
+                    <Package size={16} />
+                  </button>
+                )}
+                <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
+              </div>
+
+              {!it.manual && isExpanded && (
+                <div style={{ background: '#F2EFE6', borderRadius: 8, padding: 10, marginTop: 6, marginLeft: 42 }}>
+                  <div style={{ fontSize: 11.5, color: '#8A8574', marginBottom: 6 }}>
+                    Vật liệu dùng cho riêng dòng này (khác với công thức gốc của sản phẩm nếu bạn sửa) — mỗi lượt đặt sẽ trừ đúng theo số này × số lượng ({it.qty}).
+                  </div>
+                  {(it.materialsOverride || []).length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: '#8A8574', marginBottom: 6 }}>Không có vật liệu nào — sẽ không trừ kho cho dòng này.</div>
                   ) : (
-                    <ImageIcon size={15} color="#B8B3A2" />
+                    (it.materialsOverride || []).map((mi, mIdx) => {
+                      const m = materials.find((x) => x.id === mi.materialId);
+                      return (
+                        <div key={mIdx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                          <select style={{ ...inputStyle, flex: 2, padding: '5px 8px' }} value={mi.materialId} onChange={(e) => updateOverrideMaterial(idx, mIdx, 'materialId', e.target.value)}>
+                            {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
+                          </select>
+                          <input style={{ ...inputStyle, flex: '0 0 60px', padding: '5px 8px' }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateOverrideMaterial(idx, mIdx, 'qty', e.target.value)} />
+                          <span style={{ fontSize: 11.5, color: '#8A8574', minWidth: 26 }}>{m?.unit}</span>
+                          <span style={{ fontSize: 11, color: (m?.stockQty || 0) - mi.qty < 0 ? '#A8493F' : '#8A8574' }}>còn {m?.stockQty || 0}</span>
+                          <button type="button" onClick={() => removeOverrideMaterial(idx, mIdx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={13} /></button>
+                        </div>
+                      );
+                    })
+                  )}
+                  {materials.length > 0 && (
+                    <Btn onClick={() => addOverrideMaterial(idx)} style={{ marginTop: 2, padding: '5px 10px', fontSize: 12 }}><Plus size={12} /> Thêm vật liệu</Btn>
                   )}
                 </div>
               )}
-              {it.manual ? (
-                <input style={{ ...inputStyle, flex: 2 }} value={it.name} onChange={(e) => updateItem(idx, 'name', e.target.value)} placeholder="Tên/loại sản phẩm (nhập tay)" />
-              ) : (
-                <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
-                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              )}
-              <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
-              <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
-              <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F' }}><Trash2 size={14} /></button>
             </div>
           );
         })}
