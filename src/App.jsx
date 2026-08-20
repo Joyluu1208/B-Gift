@@ -1475,6 +1475,8 @@ function InventoryTab({ materials, restocks, onAddRestock }) {
   );
 }
 
+const MATERIALS_PAGE_SIZE = 20;
+
 function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits, onSaveCategories }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
@@ -1482,7 +1484,13 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
   const [managingUnits, setManagingUnits] = useState(false);
   const [managingCategories, setManagingCategories] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [page, setPage] = useState(1);
   const filtered = materials.filter((m) => matchesSearch(m.name, search));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / MATERIALS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered.slice((currentPage - 1) * MATERIALS_PAGE_SIZE, currentPage * MATERIALS_PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [search]);
 
   const openNew = () => setEditing({ id: uid(), name: '', unit: '', category: '', unitPrice: 0, note: '', imageUrl: '', stockQty: 0 });
 
@@ -1520,40 +1528,55 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
           {materials.length === 0 ? 'Chưa có vật liệu nào. Thêm vật liệu để bắt đầu tính giá vốn sản phẩm.' : 'Không tìm thấy vật liệu phù hợp.'}
         </Card>
       ) : (
-        <Card style={{ overflow: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '44px 1.5fr 0.9fr 0.8fr 1fr 1.3fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 720 }}>
-            <div></div><div>Tên vật liệu</div><div>Phân loại</div><div>Đơn vị</div><div>Giá vốn</div><div>Ghi chú</div><div></div>
+        <>
+          <div style={{ fontSize: 12.5, color: '#8A8574', marginBottom: 10 }}>
+            {filtered.length === materials.length
+              ? `Tổng cộng ${materials.length} vật liệu`
+              : `${filtered.length} / ${materials.length} vật liệu khớp tìm kiếm`}
+            {totalPages > 1 ? ` · Trang ${currentPage}/${totalPages}` : ''}
           </div>
-          {filtered.map((m, i) => (
-            <div key={m.id} style={{
-              display: 'grid', gridTemplateColumns: '44px 1.5fr 0.9fr 0.8fr 1fr 1.3fr auto', padding: '10px 16px', alignItems: 'center',
-              borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 720,
-            }}>
-              <div
-                onClick={() => m.imageUrl && setPreviewImage(m)}
-                style={{
-                  width: 32, height: 32, borderRadius: 6, overflow: 'hidden', background: '#EFEBDE', border: '1px solid #E3DFD3',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: m.imageUrl ? 'pointer' : 'default',
-                }}
-              >
-                {m.imageUrl ? (
-                  <img src={m.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} />
-                ) : (
-                  <ImageIcon size={14} color="#B8B3A2" />
-                )}
-              </div>
-              <div style={{ fontWeight: 600 }}>{m.name}</div>
-              <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.category}</div>
-              <div style={{ color: '#6B6759' }}>{m.unit}</div>
-              <div><Money value={m.unitPrice} size={12.5} /></div>
-              <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.note}</div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button onClick={() => setEditing(m)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
-                <button onClick={() => remove(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
-              </div>
+          <Card style={{ overflow: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '44px 1.5fr 0.9fr 0.8fr 1fr 1.3fr auto', padding: '10px 16px', background: '#EFEBDE', fontSize: 12, fontWeight: 700, color: '#6B6759', minWidth: 720 }}>
+              <div></div><div>Tên vật liệu</div><div>Phân loại</div><div>Đơn vị</div><div>Giá vốn</div><div>Ghi chú</div><div></div>
             </div>
-          ))}
-        </Card>
+            {paged.map((m, i) => (
+              <div key={m.id} style={{
+                display: 'grid', gridTemplateColumns: '44px 1.5fr 0.9fr 0.8fr 1fr 1.3fr auto', padding: '10px 16px', alignItems: 'center',
+                borderTop: i > 0 ? '1px solid #EFEBDE' : 'none', fontSize: 13.5, minWidth: 720,
+              }}>
+                <div
+                  onClick={() => m.imageUrl && setPreviewImage(m)}
+                  style={{
+                    width: 32, height: 32, borderRadius: 6, overflow: 'hidden', background: '#EFEBDE', border: '1px solid #E3DFD3',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: m.imageUrl ? 'pointer' : 'default',
+                  }}
+                >
+                  {m.imageUrl ? (
+                    <img src={m.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} />
+                  ) : (
+                    <ImageIcon size={14} color="#B8B3A2" />
+                  )}
+                </div>
+                <div style={{ fontWeight: 600 }}>{m.name}</div>
+                <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.category}</div>
+                <div style={{ color: '#6B6759' }}>{m.unit}</div>
+                <div><Money value={m.unitPrice} size={12.5} /></div>
+                <div style={{ color: '#8A8574', fontSize: 12.5 }}>{m.note}</div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button onClick={() => setEditing(m)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
+                  <button onClick={() => remove(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </Card>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 18 }}>
+              <Btn onClick={() => setPage((pg) => Math.max(1, pg - 1))} disabled={currentPage === 1}>« Trước</Btn>
+              <span style={{ fontSize: 13, color: '#6B6759', fontWeight: 600 }}>Trang {currentPage} / {totalPages}</span>
+              <Btn onClick={() => setPage((pg) => Math.min(totalPages, pg + 1))} disabled={currentPage === totalPages}>Sau »</Btn>
+            </div>
+          )}
+        </>
       )}
 
       {editing && (
@@ -1783,12 +1806,15 @@ function CategoryColorFilter({ category, setCategory, selectedColors, toggleColo
   );
 }
 
+const PRODUCTS_PAGE_SIZE = 20;
+
 function ProductsTab({ products, saveProducts, materials, computeProductCost, categories, colors, onAddCategory, onAddColor, customCategories, customColors, onRemoveCategory, onRemoveColor, onEditCategory, onEditColor, onReorderCategories, onReorderColors }) {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterColors, setFilterColors] = useState([]);
+  const [page, setPage] = useState(1);
   const toggleFilterColor = (key) => {
     if (key === null) { setFilterColors([]); return; }
     setFilterColors((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
@@ -1797,6 +1823,11 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     matchesSearch(p.name, search) &&
     (!filterCategory || p.category === filterCategory) && (filterColors.length === 0 || filterColors.includes(p.color))
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PRODUCTS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered.slice((currentPage - 1) * PRODUCTS_PAGE_SIZE, currentPage * PRODUCTS_PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [search, filterCategory, filterColors]);
 
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
@@ -1869,8 +1900,15 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
             : 'Không có sản phẩm nào khớp bộ lọc.'}
         </Card>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {filtered.map((p) => {
+        <>
+          <div style={{ fontSize: 12.5, color: '#8A8574', marginBottom: 10 }}>
+            {filtered.length === products.length
+              ? `Tổng cộng ${products.length} sản phẩm`
+              : `${filtered.length} / ${products.length} sản phẩm khớp bộ lọc`}
+            {totalPages > 1 ? ` · Trang ${currentPage}/${totalPages}` : ''}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {paged.map((p) => {
             const { cost, sell } = computeProductCost(p);
             const isOpen = expanded === p.id;
             const colorInfo = colors.find((c) => c.key === p.color);
@@ -1957,7 +1995,15 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
               </Card>
             );
           })}
-        </div>
+          </div>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 18 }}>
+              <Btn onClick={() => setPage((pg) => Math.max(1, pg - 1))} disabled={currentPage === 1}>« Trước</Btn>
+              <span style={{ fontSize: 13, color: '#6B6759', fontWeight: 600 }}>Trang {currentPage} / {totalPages}</span>
+              <Btn onClick={() => setPage((pg) => Math.min(totalPages, pg + 1))} disabled={currentPage === totalPages}>Sau »</Btn>
+            </div>
+          )}
+        </>
       )}
 
       {editing && (
