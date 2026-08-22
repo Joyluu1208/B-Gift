@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer, Phone, MessageCircle, Warehouse } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
@@ -157,6 +157,75 @@ const inputStyle = {
   background: '#FAF9F5',
   color: '#232019',
 };
+
+function SearchableSelect({ options, value, onChange, placeholder, style }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef(null);
+  const selected = options.find((o) => o.id === value);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+        setQuery('');
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filtered = query ? options.filter((o) => matchesSearch(o.label, query)) : options;
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', ...style }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          ...inputStyle, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selected ? '#232019' : '#8A8574' }}>
+          {selected ? selected.label : (placeholder || '— Chọn —')}
+        </span>
+        <ChevronDown size={14} color="#8A8574" style={{ flex: '0 0 auto' }} />
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: '#fff',
+          border: '1px solid #D7D2C2', borderRadius: 6, marginTop: 4, maxHeight: 240, overflowY: 'auto',
+          boxShadow: '0 6px 16px rgba(0,0,0,0.14)',
+        }}>
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Gõ để tìm..."
+            style={{
+              width: '100%', boxSizing: 'border-box', padding: '8px 10px', border: 'none',
+              borderBottom: '1px solid #EFEBDE', fontSize: 13, outline: 'none', position: 'sticky', top: 0,
+            }}
+          />
+          {filtered.length === 0 ? (
+            <div style={{ padding: '8px 10px', fontSize: 12.5, color: '#8A8574' }}>Không tìm thấy</div>
+          ) : filtered.map((o) => (
+            <div
+              key={o.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(o.id); setOpen(false); setQuery(''); }}
+              style={{
+                padding: '7px 10px', fontSize: 13, cursor: 'pointer',
+                background: o.id === value ? '#F2EFE6' : 'transparent',
+              }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Btn({ children, onClick, variant = 'default', style, type = 'button', disabled }) {
   const variants = {
@@ -2546,9 +2615,12 @@ function ProductForm({ data, materials, onSubmit, onCancel, computeProductCost, 
                   const lineTotal = (m?.unitPrice || 0) * Number(mi.qty || 0);
                   return (
                     <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                      <select style={{ ...inputStyle, flex: 2 }} value={mi.materialId} onChange={(e) => updateRow(idx, 'materialId', e.target.value)}>
-                        {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
-                      </select>
+                      <SearchableSelect
+                        style={{ flex: 2 }}
+                        options={materials.map((mat) => ({ id: mat.id, label: mat.name }))}
+                        value={mi.materialId}
+                        onChange={(id) => updateRow(idx, 'materialId', id)}
+                      />
                       <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateRow(idx, 'qty', e.target.value)} />
                       <span style={{ fontSize: 12, color: '#8A8574', minWidth: 26 }}>{m?.unit}</span>
                       <div style={{ flex: '0 0 90px', textAlign: 'right' }}>
@@ -3430,9 +3502,12 @@ function OrderForm({ data, customers, products, materials, computeProductCost, o
                 {it.manual ? (
                   <input style={{ ...inputStyle, flex: 2 }} value={it.name} onChange={(e) => updateItem(idx, 'name', e.target.value)} placeholder="Tên/loại sản phẩm (nhập tay)" />
                 ) : (
-                  <select style={{ ...inputStyle, flex: 2 }} value={it.productId} onChange={(e) => updateItem(idx, 'productId', e.target.value)}>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    style={{ flex: 2 }}
+                    options={products.map((p) => ({ id: p.id, label: p.name }))}
+                    value={it.productId}
+                    onChange={(id) => updateItem(idx, 'productId', id)}
+                  />
                 )}
                 <input style={{ ...inputStyle, flex: '0 0 60px' }} type="number" min="1" value={it.qty} onChange={(e) => updateItem(idx, 'qty', e.target.value)} title="Số lượng" />
                 <input style={{ ...inputStyle, flex: '0 0 110px' }} type="number" min="0" value={it.price} onChange={(e) => updateItem(idx, 'price', e.target.value)} title="Đơn giá bán" />
@@ -3457,9 +3532,12 @@ function OrderForm({ data, customers, products, materials, computeProductCost, o
                       const m = materials.find((x) => x.id === mi.materialId);
                       return (
                         <div key={mIdx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                          <select style={{ ...inputStyle, flex: 2, padding: '5px 8px' }} value={mi.materialId} onChange={(e) => updateOverrideMaterial(idx, mIdx, 'materialId', e.target.value)}>
-                            {materials.map((mat) => <option key={mat.id} value={mat.id}>{mat.name}</option>)}
-                          </select>
+                          <SearchableSelect
+                            style={{ flex: 2 }}
+                            options={materials.map((mat) => ({ id: mat.id, label: mat.name }))}
+                            value={mi.materialId}
+                            onChange={(id) => updateOverrideMaterial(idx, mIdx, 'materialId', id)}
+                          />
                           <input style={{ ...inputStyle, flex: '0 0 60px', padding: '5px 8px' }} type="number" min="0" step="0.01" value={mi.qty} onChange={(e) => updateOverrideMaterial(idx, mIdx, 'qty', e.target.value)} />
                           <span style={{ fontSize: 11.5, color: '#8A8574', minWidth: 26 }}>{m?.unit}</span>
                           <span style={{ fontSize: 11, color: (m?.stockQty || 0) - mi.qty < 0 ? '#A8493F' : '#8A8574' }}>còn {m?.stockQty || 0}</span>
