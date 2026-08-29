@@ -947,6 +947,7 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap, teamR
   const pending = orders.filter((o) => o.status === 'moi' || o.status === 'dangLam').length;
   const recent = [...orders].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '')).slice(0, 6);
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [resourcePreview, setResourcePreview] = useState(null);
 
   const monthlyRevenue = useMemo(() => {
     const now = new Date();
@@ -1049,7 +1050,8 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap, teamR
           <p style={{ fontSize: 13.5, color: '#4A4638', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginTop: 0 }}>{teamResources.rulesText}</p>
         )}
         {teamResources.rulesImageUrl && (
-          <img src={teamResources.rulesImageUrl} alt="Nội quy" style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #E3DFD3', marginBottom: 14 }} />
+          <img src={teamResources.rulesImageUrl} alt="Nội quy" onClick={() => setResourcePreview({ url: teamResources.rulesImageUrl, label: 'Nội quy' })}
+            style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #E3DFD3', marginBottom: 14, cursor: 'zoom-in' }} />
         )}
         {(teamResources.links || []).length > 0 && (
           <div style={{ marginBottom: (teamResources.qrImages || []).length > 0 ? 16 : 0 }}>
@@ -1071,7 +1073,8 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap, teamR
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 12 }}>
               {teamResources.qrImages.map((q) => (
                 <div key={q.id} style={{ textAlign: 'center' }}>
-                  <img src={q.url} alt={q.label} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'contain', borderRadius: 8, border: '1px solid #E3DFD3', background: '#fff' }} />
+                  <img src={q.url} alt={q.label} onClick={() => setResourcePreview({ url: q.url, label: q.label || 'Mã QR' })}
+                    style={{ width: '100%', aspectRatio: '1/1', objectFit: 'contain', borderRadius: 8, border: '1px solid #E3DFD3', background: '#fff', cursor: 'zoom-in' }} />
                   {q.label && <div style={{ fontSize: 11.5, color: '#8A8574', marginTop: 4 }}>{q.label}</div>}
                 </div>
               ))}
@@ -1082,6 +1085,31 @@ function Dashboard({ orders, customers, products, orderTotal, customerMap, teamR
           <div style={{ fontSize: 13, color: '#8A8574' }}>Chưa có nội dung nào — bấm "Chỉnh sửa" để thêm nội quy, mã QR, hoặc link cho team.</div>
         )}
       </Card>
+
+      {resourcePreview && (
+        <div onClick={() => setResourcePreview(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(10,10,8,0.92)', zIndex: 100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, cursor: 'zoom-out',
+        }}>
+          <img src={resourcePreview.url} alt={resourcePreview.label} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
+          <button onClick={(e) => { e.stopPropagation(); setResourcePreview(null); }} style={{
+            position: 'absolute', top: 18, right: 18, background: 'rgba(255,255,255,0.15)', color: '#fff',
+            border: 'none', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            <X size={20} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); downloadImage(resourcePreview.url, `${resourcePreview.label || 'anh'}.jpg`); }}
+            style={{
+              position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', color: '#fff',
+              border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            <Download size={15} /> Tải ảnh về
+          </button>
+        </div>
+      )}
 
       {resourcesOpen && (
         <TeamResourcesModal resources={teamResources} onSave={(r) => { onSaveTeamResources(r); setResourcesOpen(false); }} onClose={() => setResourcesOpen(false)} />
