@@ -1605,6 +1605,28 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
     saveMaterials(materials.map((m) => (map[m.id] !== undefined ? { ...m, unitPrice: map[m.id] } : m)));
   };
 
+  const [exportingImages, setExportingImages] = useState(false);
+  const [exportProgress, setExportProgress] = useState({ done: 0, total: 0 });
+
+  const handleExportImages = async () => {
+    const withImages = materials.filter((m) => m.imageUrl);
+    if (withImages.length === 0) { window.alert('Chưa có vật liệu nào có ảnh.'); return; }
+    setExportingImages(true);
+    setExportProgress({ done: 0, total: withImages.length });
+    try {
+      await exportImagesAsZip(
+        withImages.map((m) => ({ name: m.name, imageUrl: m.imageUrl })),
+        `anh-vat-lieu-${todayStr()}.zip`,
+        (done, total) => setExportProgress({ done, total })
+      );
+    } catch (e) {
+      console.error(e);
+      window.alert('Có lỗi khi tải ảnh về, vui lòng thử lại.');
+    } finally {
+      setExportingImages(false);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
@@ -1616,6 +1638,11 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
           <Btn onClick={() => setManagingUnits(true)}>Quản lý đơn vị</Btn>
           <Btn onClick={() => setManagingCategories(true)}>Quản lý phân loại</Btn>
           {materials.length > 0 && <Btn onClick={() => setBulkOpen(true)}>Sửa giá vốn hàng loạt</Btn>}
+          {materials.some((m) => m.imageUrl) && (
+            <Btn onClick={handleExportImages} disabled={exportingImages}>
+              <Download size={14} /> {exportingImages ? `Đang tải... ${exportProgress.done}/${exportProgress.total}` : 'Tải tất cả ảnh (.zip)'}
+            </Btn>
+          )}
           <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
         </div>
       </div>
@@ -1956,6 +1983,8 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
 
   const [managing, setManaging] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [exportingImages, setExportingImages] = useState(false);
+  const [exportProgress, setExportProgress] = useState({ done: 0, total: 0 });
 
   const applyBulkPrices = (updates) => {
     const map = Object.fromEntries(updates.map((u) => [u.id, u.newPrice]));
@@ -1970,6 +1999,25 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     }));
   };
 
+  const handleExportImages = async () => {
+    const withImages = products.filter((p) => p.imageUrl);
+    if (withImages.length === 0) { window.alert('Chưa có sản phẩm nào có ảnh.'); return; }
+    setExportingImages(true);
+    setExportProgress({ done: 0, total: withImages.length });
+    try {
+      await exportImagesAsZip(
+        withImages.map((p) => ({ name: p.name, imageUrl: p.imageUrl })),
+        `anh-san-pham-${todayStr()}.zip`,
+        (done, total) => setExportProgress({ done, total })
+      );
+    } catch (e) {
+      console.error(e);
+      window.alert('Có lỗi khi tải ảnh về, vui lòng thử lại.');
+    } finally {
+      setExportingImages(false);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -1980,6 +2028,11 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Btn onClick={() => setManaging(true)}>Quản lý loại &amp; màu</Btn>
           {products.length > 0 && <Btn onClick={() => setBulkOpen(true)}>Sửa giá bán hàng loạt</Btn>}
+          {products.some((p) => p.imageUrl) && (
+            <Btn onClick={handleExportImages} disabled={exportingImages}>
+              <Download size={14} /> {exportingImages ? `Đang tải... ${exportProgress.done}/${exportProgress.total}` : 'Tải tất cả ảnh (.zip)'}
+            </Btn>
+          )}
           <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
         </div>
       </div>
@@ -2733,6 +2786,43 @@ async function downloadImage(url, filename) {
   } catch (e) {
     window.open(url, '_blank');
   }
+}
+
+// Tải nhiều ảnh cùng lúc, gom vào 1 file .zip để tải về máy — dùng khi cần sao lưu
+// toàn bộ ảnh sản phẩm/vật liệu. Chỉ hoạt động trên bản web thật đã cài thư viện jszip.
+async function exportImagesAsZip(items, zipFilename, onProgress) {
+  const mod = await import('jszip');
+  const JSZip = mod.default || mod;
+  const zip = new JSZip();
+  const usedNames = new Set();
+  let done = 0;
+  for (const item of items) {
+    if (item.imageUrl) {
+      try {
+        const res = await fetch(item.imageUrl);
+        const blob = await res.blob();
+        const base = (item.name || 'anh').replace(/[\\/:*?"<>|]/g, '').trim() || 'anh';
+        let filename = `${base}.jpg`;
+        let i = 2;
+        while (usedNames.has(filename)) { filename = `${base}-${i}.jpg`; i++; }
+        usedNames.add(filename);
+        zip.file(filename, blob);
+      } catch (e) {
+        console.error('Lỗi tải ảnh', item.name, e);
+      }
+    }
+    done++;
+    if (onProgress) onProgress(done, items.length);
+  }
+  const content = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = zipFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 const MENU_PAGE_SIZE = 25;
