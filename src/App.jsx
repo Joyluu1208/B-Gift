@@ -795,13 +795,6 @@ function AdminApp() {
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
 
-    const matSheet = materials.map((m) => ({
-      'Tên vật liệu': m.name, 'Phân loại': m.category || '', 'Đơn vị': m.unit,
-      'Giá vốn': Number(m.unitPrice || 0),
-      'Ghi chú': m.note || '', 'Link ảnh': m.imageUrl || '',
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matSheet), 'Vật liệu');
-
     const prodSheet = products.map((p) => {
       const { cost, sell } = computeProductCost(p);
       const colorLabel = allColors.find((c) => c.key === p.color)?.label || '';
@@ -821,45 +814,13 @@ function AdminApp() {
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodSheet), 'Sản phẩm');
 
-    const custSheet = customers.map((c) => ({
-      'Mã khách hàng': c.customerCode || '', 'Tên khách hàng': c.name, 'SĐT': c.phone || '', 'Nguồn': c.source || '',
-      'Tên Facebook': c.facebookName || '', 'Link Facebook': c.facebookLink || '',
-      'Địa chỉ': c.address || '', 'Ngày liên hệ': c.contactDate || '',
-      'Budget': Number(c.budget || 0), 'Ghi chú': c.note || '',
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(custSheet), 'Khách hàng');
-
-    const orderSheet = orders.map((o) => {
-      const custName = customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)';
-      const custSource = customerMap[o.customerId]?.source || o.source || '';
-      const itemsText = (o.items || [])
-        .map((it) => `${it.manual ? it.name : (productMap[it.productId]?.name || '(đã xoá)')} x${it.qty}`)
-        .join('; ');
-      const total = orderTotal(o);
-      const remain = total - Number(o.depositAmount || 0);
-      return {
-        'Mã đơn': o.orderCode || '', 'Ngày đặt': o.orderDate || '', 'Ngày giao': o.deliveryDate || '', 'Khách hàng': custName, 'Nguồn': custSource,
-        'Trạng thái': STATUS.find((s) => s.key === o.status)?.label || o.status,
-        'Sản phẩm': itemsText, 'Tổng tiền': total, 'Phí ship': Number(o.shippingFee || 0),
-        'Đã cọc': Number(o.depositAmount || 0),
-        'Còn phải thu': remain > 0 ? remain : 0,
-        'Hình thức giao': o.deliveryMethod || '', 'ĐV vận chuyển': o.shippingCarrier || '',
-        'Mã vận đơn': o.trackingCode || '', 'Nội dung in': o.printRequest || '', 'Ghi chú': o.note || '',
-      };
-    });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderSheet), 'Đơn hàng');
-
     XLSX.writeFile(wb, `bo-gift-so-lieu-${todayStr()}.xlsx`);
   };
 
   const NAV = [
     { key: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-    { key: 'materials', label: 'Vật liệu', icon: Package },
-    { key: 'inventory', label: 'Tồn kho', icon: Warehouse },
     { key: 'products', label: 'Sản phẩm', icon: ShoppingBag },
     { key: 'menu', label: 'Menu sản phẩm', icon: ImageIcon },
-    { key: 'customers', label: 'Khách hàng', icon: Users },
-    { key: 'orders', label: 'Đơn hàng', icon: ClipboardList },
   ];
 
   if (!ready) {
@@ -935,16 +896,7 @@ function AdminApp() {
 
         <main style={{ paddingBottom: 60 }}>
           {tab === 'dashboard' && (
-            <Dashboard orders={orders} customers={customers} products={products} orderTotal={orderTotal} customerMap={customerMap}
-              teamResources={teamResources} onSaveTeamResources={saveTeamResources} />
-          )}
-          {tab === 'materials' && (
-            <MaterialsTab materials={materials} saveMaterials={saveMaterials}
-              units={materialUnits} categories={materialCategories}
-              onSaveUnits={saveMaterialUnits} onSaveCategories={saveMaterialCategories} />
-          )}
-          {tab === 'inventory' && (
-            <InventoryTab materials={materials} restocks={materialRestocks} onAddRestock={addRestock} onEditRestock={editRestock} onRemoveRestock={removeRestock} />
+            <Dashboard products={products} teamResources={teamResources} onSaveTeamResources={saveTeamResources} />
           )}
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
@@ -954,16 +906,6 @@ function AdminApp() {
           )}
           {tab === 'menu' && (
             <MenuTab products={products} computeProductCost={computeProductCost} categories={allCategories} colors={allColors} />
-          )}
-          {tab === 'customers' && (
-            <CustomersTab customers={customers} saveCustomers={saveCustomers} orders={orders} />
-          )}
-          {tab === 'orders' && (
-            <OrdersTab orders={orders} saveOrders={saveOrders} customers={customers} products={products}
-              customerMap={customerMap} productMap={productMap} computeProductCost={computeProductCost} orderTotal={orderTotal}
-              materials={materials} saveMaterials={saveMaterials}
-              deliveryMethods={deliveryMethods} shippingCarriers={shippingCarriers}
-              onAddDeliveryMethod={addDeliveryMethod} onAddShippingCarrier={addShippingCarrier} />
           )}
         </main>
       </div>
@@ -980,106 +922,15 @@ function StatCard({ label, value, accent }) {
   );
 }
 
-function Dashboard({ orders, customers, products, orderTotal, customerMap, teamResources, onSaveTeamResources }) {
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const monthOrders = orders.filter((o) => (o.orderDate || '').startsWith(thisMonth));
-  const revenue = monthOrders.filter((o) => o.status !== 'huy').reduce((s, o) => s + orderTotal(o), 0);
-  const pending = orders.filter((o) => o.status === 'moi' || o.status === 'dangLam').length;
-  const recent = [...orders].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || '')).slice(0, 6);
+function Dashboard({ products, teamResources, onSaveTeamResources }) {
   const [resourcesOpen, setResourcesOpen] = useState(false);
   const [resourcePreview, setResourcePreview] = useState(null);
-
-  const monthlyRevenue = useMemo(() => {
-    const now = new Date();
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push({ key: d.toISOString().slice(0, 7), label: `T${d.getMonth() + 1}` });
-    }
-    return months.map(({ key, label }) => {
-      const total = orders
-        .filter((o) => (o.orderDate || '').startsWith(key) && o.status !== 'huy')
-        .reduce((s, o) => s + orderTotal(o), 0);
-      return { label, total };
-    });
-  }, [orders, orderTotal]);
-
-  const bySource = useMemo(() => {
-    const map = {};
-    customers.forEach((c) => {
-      const key = c.source && c.source.trim() ? c.source : '(Chưa rõ nguồn)';
-      map[key] = (map[key] || 0) + 1;
-    });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [customers]);
-  const maxSourceCount = bySource.length > 0 ? bySource[0][1] : 1;
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-        <StatCard label="Khách hàng" value={customers.length} />
         <StatCard label="Sản phẩm" value={products.length} />
-        <StatCard label="Đơn đang xử lý" value={pending} accent="#B8763B" />
-        <StatCard label="Doanh thu tháng này" value={fmtVND(revenue)} accent="#5C7A5E" />
       </div>
-
-      <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Doanh thu 6 tháng gần đây</h3>
-      <Card style={{ padding: '16px 16px 8px', marginBottom: 24, height: 220 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={monthlyRevenue} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E3DFD3" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#8A8574' }} axisLine={{ stroke: '#D7D2C2' }} tickLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: '#8A8574' }} axisLine={false} tickLine={false}
-              tickFormatter={(v) => (v >= 1000000 ? `${Math.round(v / 1000000)}tr` : v >= 1000 ? `${Math.round(v / 1000)}k` : v)} />
-            <Tooltip formatter={(v) => fmtVND(v)} contentStyle={{ fontSize: 12.5, borderRadius: 8, border: '1px solid #E3DFD3' }} />
-            <Bar dataKey="total" name="Doanh thu" fill="#B8763B" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </Card>
-
-      <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Khách hàng theo nguồn</h3>
-      {bySource.length === 0 ? (
-        <Card style={{ padding: 20, color: '#8A8574', fontSize: 14, marginBottom: 24 }}>Chưa có khách hàng nào.</Card>
-      ) : (
-        <Card style={{ padding: '14px 16px', marginBottom: 24 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {bySource.map(([source, count]) => (
-              <div key={source}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 3 }}>
-                  <span style={{ color: '#232019', fontWeight: 600 }}>{source}</span>
-                  <span style={{ color: '#8A8574' }}>{count} khách</span>
-                </div>
-                <div style={{ height: 6, background: '#EFEBDE', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ width: `${(count / maxSourceCount) * 100}%`, height: '100%', background: '#B8763B', borderRadius: 4 }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <h3 style={{ fontSize: 15, color: '#1E2A38', marginBottom: 10 }}>Đơn hàng gần đây</h3>
-      {recent.length === 0 ? (
-        <Card style={{ padding: 20, color: '#8A8574', fontSize: 14 }}>Chưa có đơn hàng nào. Vào tab "Đơn hàng" để tạo đơn đầu tiên.</Card>
-      ) : (
-        <Card style={{ overflow: 'hidden' }}>
-          {recent.map((o, i) => (
-            <div key={o.id} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '12px 16px', borderBottom: i < recent.length - 1 ? '1px solid #EFEBDE' : 'none',
-            }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{customerMap[o.customerId]?.name || o.customerName || '(Khách lẻ)'}</div>
-                <div style={{ fontSize: 12, color: '#8A8574' }}>{o.orderDate}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <Money value={orderTotal(o)} />
-                <StatusStamp statusKey={o.status} />
-              </div>
-            </div>
-          ))}
-        </Card>
-      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '24px 0 10px' }}>
         <h3 style={{ fontSize: 15, color: '#1E2A38', margin: 0 }}>Tài nguyên & nội quy cho team</h3>
