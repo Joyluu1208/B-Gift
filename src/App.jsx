@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer, Phone, MessageCircle, Warehouse } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Users, ClipboardList, Plus, Trash2, Pencil, X, Search, ChevronDown, ChevronUp, Save, Image as ImageIcon, Download, GripVertical, Check, Printer, Phone, MessageCircle, Warehouse, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import * as XLSX from 'xlsx';
 import { storage, auth, notify } from './storage.js';
@@ -667,11 +667,46 @@ function AdminApp() {
   const saveMaterials = (d) => { setMaterials(d); persist('materials', d); };
   const saveProducts = (d) => { setProducts(d); persist('products', d); };
   const saveCustomers = (d) => { setCustomers(d); persist('customers', d); };
-  const addRestock = (materialId, qty, unitPrice, date) => {
-    const entry = { id: uid(), materialId, qty: Number(qty), unitPrice: Number(unitPrice), totalCost: Number(qty) * Number(unitPrice), date };
+  const addRestock = (materialId, qty, unitPrice, date, shippingFee, updateUnitPrice) => {
+    const q = Number(qty);
+    const totalCost = q * Number(unitPrice) + Number(shippingFee || 0);
+    const effectivePrice = q > 0 ? totalCost / q : Number(unitPrice);
+    const entry = { id: uid(), materialId, qty: q, unitPrice: Number(unitPrice), shippingFee: Number(shippingFee || 0), totalCost, date };
     const nextRestocks = [...materialRestocks, entry];
     setMaterialRestocks(nextRestocks); persist('materialRestocks', nextRestocks);
-    const nextMaterials = materials.map((m) => (m.id === materialId ? { ...m, stockQty: Number(m.stockQty || 0) + Number(qty) } : m));
+    const nextMaterials = materials.map((m) => (m.id === materialId ? {
+      ...m,
+      stockQty: Number(m.stockQty || 0) + q,
+      unitPrice: updateUnitPrice ? Math.round(effectivePrice) : m.unitPrice,
+    } : m));
+    setMaterials(nextMaterials); persist('materials', nextMaterials);
+  };
+  const editRestock = (restockId, newQty, newUnitPrice, newDate, newShippingFee, updateUnitPrice) => {
+    const old = materialRestocks.find((r) => r.id === restockId);
+    if (!old) return;
+    const qty = Number(newQty);
+    const unitPrice = Number(newUnitPrice);
+    const shippingFee = Number(newShippingFee || 0);
+    const totalCost = qty * unitPrice + shippingFee;
+    const effectivePrice = qty > 0 ? totalCost / qty : unitPrice;
+    const delta = qty - Number(old.qty);
+    const nextRestocks = materialRestocks.map((r) => (
+      r.id === restockId ? { ...r, qty, unitPrice, shippingFee, totalCost, date: newDate } : r
+    ));
+    setMaterialRestocks(nextRestocks); persist('materialRestocks', nextRestocks);
+    const nextMaterials = materials.map((m) => (m.id === old.materialId ? {
+      ...m,
+      stockQty: Number(m.stockQty || 0) + delta,
+      unitPrice: updateUnitPrice ? Math.round(effectivePrice) : m.unitPrice,
+    } : m));
+    setMaterials(nextMaterials); persist('materials', nextMaterials);
+  };
+  const removeRestock = (restockId) => {
+    const old = materialRestocks.find((r) => r.id === restockId);
+    if (!old) return;
+    const nextRestocks = materialRestocks.filter((r) => r.id !== restockId);
+    setMaterialRestocks(nextRestocks); persist('materialRestocks', nextRestocks);
+    const nextMaterials = materials.map((m) => (m.id === old.materialId ? { ...m, stockQty: Number(m.stockQty || 0) - Number(old.qty) } : m));
     setMaterials(nextMaterials); persist('materials', nextMaterials);
   };
   const saveTeamResources = (next) => { setTeamResources(next); persist('teamResources', next); };
@@ -761,28 +796,33 @@ function AdminApp() {
     const wb = XLSX.utils.book_new();
 
     const matSheet = materials.map((m) => ({
-      'Tên vật liệu': m.name, 'Đơn vị': m.unit,
+      'Tên vật liệu': m.name, 'Phân loại': m.category || '', 'Đơn vị': m.unit,
       'Giá vốn': Number(m.unitPrice || 0),
-      'Ghi chú': m.note || '',
+      'Ghi chú': m.note || '', 'Link ảnh': m.imageUrl || '',
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matSheet), 'Vật liệu');
 
     const prodSheet = products.map((p) => {
       const { cost, sell } = computeProductCost(p);
+      const colorLabel = allColors.find((c) => c.key === p.color)?.label || '';
       return {
         'Tên sản phẩm': p.name,
+        'Loại': p.category || '',
+        'Màu': colorLabel,
         'Chế độ giá': p.manualPrice ? 'Nhập tay' : 'Tính theo vật liệu',
         'Giá vốn': cost == null ? '' : Math.round(cost),
         'Giá bán': Math.round(sell),
         'Tiền trang trí': Number(p.decorationCost || 0),
         'Chi phí công': Number(p.laborCost || 0),
         'Lợi nhuận %': Number(p.profitPct || 0),
+        'Mô tả': p.description || '',
+        'Link ảnh': p.imageUrl || '',
       };
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodSheet), 'Sản phẩm');
 
     const custSheet = customers.map((c) => ({
-      'Tên khách hàng': c.name, 'SĐT': c.phone || '', 'Nguồn': c.source || '',
+      'Mã khách hàng': c.customerCode || '', 'Tên khách hàng': c.name, 'SĐT': c.phone || '', 'Nguồn': c.source || '',
       'Tên Facebook': c.facebookName || '', 'Link Facebook': c.facebookLink || '',
       'Địa chỉ': c.address || '', 'Ngày liên hệ': c.contactDate || '',
       'Budget': Number(c.budget || 0), 'Ghi chú': c.note || '',
@@ -904,7 +944,7 @@ function AdminApp() {
               onSaveUnits={saveMaterialUnits} onSaveCategories={saveMaterialCategories} />
           )}
           {tab === 'inventory' && (
-            <InventoryTab materials={materials} restocks={materialRestocks} onAddRestock={addRestock} />
+            <InventoryTab materials={materials} restocks={materialRestocks} onAddRestock={addRestock} onEditRestock={editRestock} onRemoveRestock={removeRestock} />
           )}
           {tab === 'products' && (
             <ProductsTab products={products} saveProducts={saveProducts} materials={materials} computeProductCost={computeProductCost}
@@ -1442,12 +1482,20 @@ function BulkPriceModal({ title, items, onApply, onClose }) {
   );
 }
 
-function InventoryTab({ materials, restocks, onAddRestock }) {
+function InventoryTab({ materials, restocks, onAddRestock, onEditRestock, onRemoveRestock }) {
   const [restockingId, setRestockingId] = useState(null);
   const [rQty, setRQty] = useState(1);
   const [rPrice, setRPrice] = useState(0);
+  const [rShip, setRShip] = useState(0);
+  const [rUpdatePrice, setRUpdatePrice] = useState(true);
   const [rDate, setRDate] = useState(todayStr());
   const [search, setSearch] = useState('');
+  const [editingRestockId, setEditingRestockId] = useState(null);
+  const [erQty, setErQty] = useState(1);
+  const [erPrice, setErPrice] = useState(0);
+  const [erShip, setErShip] = useState(0);
+  const [erUpdatePrice, setErUpdatePrice] = useState(false);
+  const [erDate, setErDate] = useState(todayStr());
   const thisMonth = todayStr().slice(0, 7);
 
   const filtered = materials.filter((m) => matchesSearch(m.name, search));
@@ -1456,12 +1504,14 @@ function InventoryTab({ materials, restocks, onAddRestock }) {
     setRestockingId(m.id);
     setRQty(1);
     setRPrice(m.unitPrice || 0);
+    setRShip(0);
+    setRUpdatePrice(true);
     setRDate(todayStr());
   };
 
   const confirmRestock = () => {
     if (!rQty || rQty <= 0) { setRestockingId(null); return; }
-    onAddRestock(restockingId, rQty, rPrice, rDate);
+    onAddRestock(restockingId, rQty, rPrice, rDate, rShip, rUpdatePrice);
     setRestockingId(null);
   };
 
@@ -1483,6 +1533,25 @@ function InventoryTab({ materials, restocks, onAddRestock }) {
   }, [restocks]);
 
   const materialMap = useMemo(() => Object.fromEntries(materials.map((m) => [m.id, m])), [materials]);
+
+  const startEditRestock = (r) => {
+    setEditingRestockId(r.id);
+    setErQty(r.qty);
+    setErPrice(r.unitPrice);
+    setErShip(r.shippingFee || 0);
+    setErUpdatePrice(false);
+    setErDate(r.date || todayStr());
+  };
+  const confirmEditRestock = () => {
+    if (!erQty || erQty <= 0) { setEditingRestockId(null); return; }
+    onEditRestock(editingRestockId, erQty, erPrice, erDate, erShip, erUpdatePrice);
+    setEditingRestockId(null);
+  };
+  const handleRemoveRestock = (r) => {
+    if (window.confirm(`Xoá lần nhập kho "${materialMap[r.materialId]?.name || ''}" — ${r.qty} ${materialMap[r.materialId]?.unit || ''} ngày ${r.date}? Tồn kho sẽ được trừ lại tương ứng.`)) {
+      onRemoveRestock(r.id);
+    }
+  };
 
   return (
     <div>
@@ -1507,6 +1576,7 @@ function InventoryTab({ materials, restocks, onAddRestock }) {
           {filtered.map((m, i) => {
             const stock = Number(m.stockQty || 0);
             const mt = monthTotals.byMaterial[m.id];
+            const effectivePrice = rQty > 0 ? (rQty * Number(rPrice || 0) + Number(rShip || 0)) / rQty : Number(rPrice || 0);
             return (
               <div key={m.id}>
                 <div style={{
@@ -1534,13 +1604,23 @@ function InventoryTab({ materials, restocks, onAddRestock }) {
                         <input style={{ ...inputStyle, width: 130 }} type="number" min="0" value={rPrice} onChange={(e) => setRPrice(Number(e.target.value))} />
                       </div>
                       <div>
+                        <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Phí ship (đ)</label>
+                        <input style={{ ...inputStyle, width: 120 }} type="number" min="0" value={rShip} onChange={(e) => setRShip(Number(e.target.value))} />
+                      </div>
+                      <div>
                         <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Ngày nhập</label>
                         <input style={{ ...inputStyle, width: 150 }} type="date" value={rDate} onChange={(e) => setRDate(e.target.value)} />
                       </div>
-                      <Money value={rQty * rPrice} size={13} bold />
+                      <Money value={rQty * rPrice + Number(rShip || 0)} size={13} bold />
                       <Btn variant="primary" onClick={confirmRestock}><Save size={13} /> Lưu nhập kho</Btn>
                       <Btn onClick={() => setRestockingId(null)}>Huỷ</Btn>
                     </div>
+                    {Number(rShip || 0) > 0 && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12.5, color: '#4A4638', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={rUpdatePrice} onChange={(e) => setRUpdatePrice(e.target.checked)} />
+                        Cập nhật Giá vốn của "{m.name}" thành <Money value={effectivePrice} size={12.5} bold /> (đã gồm phí ship chia đều theo số lượng)
+                      </label>
+                    )}
                   </div>
                 )}
               </div>
@@ -1555,15 +1635,56 @@ function InventoryTab({ materials, restocks, onAddRestock }) {
       ) : (
         <Card style={{ overflow: 'hidden' }}>
           {recentRestocks.map((r, i) => (
-            <div key={r.id} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '10px 16px', borderBottom: i < recentRestocks.length - 1 ? '1px solid #EFEBDE' : 'none', fontSize: 13,
-            }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{materialMap[r.materialId]?.name || '(đã xoá)'}</div>
-                <div style={{ fontSize: 11.5, color: '#8A8574' }}>{r.date} · {r.qty} {materialMap[r.materialId]?.unit} × {fmtVND(r.unitPrice)}</div>
+            <div key={r.id} style={{ borderBottom: i < recentRestocks.length - 1 ? '1px solid #EFEBDE' : 'none' }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '10px 16px', fontSize: 13,
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{materialMap[r.materialId]?.name || '(đã xoá)'}</div>
+                  <div style={{ fontSize: 11.5, color: '#8A8574' }}>
+                    {r.date} · {r.qty} {materialMap[r.materialId]?.unit} × {fmtVND(r.unitPrice)}
+                    {Number(r.shippingFee) > 0 ? ` · Ship: ${fmtVND(r.shippingFee)}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Money value={r.totalCost} size={13} bold />
+                  <button onClick={() => startEditRestock(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6759', padding: 4 }}><Pencil size={14} /></button>
+                  <button onClick={() => handleRemoveRestock(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A8493F', padding: 4 }}><Trash2 size={14} /></button>
+                </div>
               </div>
-              <Money value={r.totalCost} size={13} bold />
+              {editingRestockId === r.id && (
+                <div style={{ padding: '10px 16px 16px', background: '#F2EFE6', borderTop: '1px solid #E3DFD3' }}>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Số lượng nhập</label>
+                      <input style={{ ...inputStyle, width: 100 }} type="number" min="0.01" step="0.01" value={erQty} onChange={(e) => setErQty(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Đơn giá nhập (đ)</label>
+                      <input style={{ ...inputStyle, width: 130 }} type="number" min="0" value={erPrice} onChange={(e) => setErPrice(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Phí ship (đ)</label>
+                      <input style={{ ...inputStyle, width: 120 }} type="number" min="0" value={erShip} onChange={(e) => setErShip(Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 11.5, color: '#6B6759', marginBottom: 3 }}>Ngày nhập</label>
+                      <input style={{ ...inputStyle, width: 150 }} type="date" value={erDate} onChange={(e) => setErDate(e.target.value)} />
+                    </div>
+                    <Money value={erQty * erPrice + Number(erShip || 0)} size={13} bold />
+                    <Btn variant="primary" onClick={confirmEditRestock}><Save size={13} /> Lưu thay đổi</Btn>
+                    <Btn onClick={() => setEditingRestockId(null)}>Huỷ</Btn>
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12.5, color: '#4A4638', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={erUpdatePrice} onChange={(e) => setErUpdatePrice(e.target.checked)} />
+                    Cập nhật Giá vốn của "{materialMap[r.materialId]?.name || ''}" theo giá gồm phí ship này
+                  </label>
+                  <div style={{ fontSize: 11, color: '#8A8574', marginTop: 6 }}>
+                    Sửa số này sẽ tự điều chỉnh lại tồn kho hiện tại của vật liệu cho khớp.
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </Card>
@@ -1627,6 +1748,52 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
     }
   };
 
+  const downloadMaterialTemplate = () => {
+    const rows = [
+      { 'Tên vật liệu': 'VD: Bánh Hello Panda', 'Phân loại': 'Bánh', 'Đơn vị': 'Hộp', 'Giá vốn': 19000, 'Ghi chú': 'Nhà cung cấp A', 'Link ảnh': '' },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Vật liệu');
+    XLSX.writeFile(wb, 'mau-nhap-vat-lieu.xlsx');
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (rows.length === 0) { window.alert('File không có dữ liệu.'); return; }
+      const next = [...materials];
+      let added = 0, updated = 0;
+      rows.forEach((row) => {
+        const name = String(row['Tên vật liệu'] || '').trim();
+        if (!name) return;
+        const category = String(row['Phân loại'] || '').trim();
+        const unit = String(row['Đơn vị'] || '').trim();
+        const unitPrice = Number(row['Giá vốn'] || 0);
+        const note = String(row['Ghi chú'] || '').trim();
+        const imageUrl = String(row['Link ảnh'] || '').trim();
+        const idx = next.findIndex((m) => m.name.trim().toLowerCase() === name.toLowerCase());
+        if (idx >= 0) {
+          next[idx] = { ...next[idx], category: category || next[idx].category, unit: unit || next[idx].unit, unitPrice, note: note || next[idx].note, imageUrl: imageUrl || next[idx].imageUrl };
+          updated++;
+        } else {
+          next.push({ id: uid(), name, category, unit, unitPrice, note, imageUrl, stockQty: 0 });
+          added++;
+        }
+      });
+      saveMaterials(next);
+      window.alert(`Đã nhập xong: ${added} vật liệu mới, ${updated} vật liệu được cập nhật (theo đúng tên trùng khớp).`);
+    } catch (err) {
+      console.error(err);
+      window.alert('Không đọc được file. Hãy chắc chắn đây là file Excel (.xlsx) đúng định dạng — bạn có thể tải file mẫu để dùng lại đúng tên cột.');
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
@@ -1643,6 +1810,14 @@ function MaterialsTab({ materials, saveMaterials, units, categories, onSaveUnits
               <Download size={14} /> {exportingImages ? `Đang tải... ${exportProgress.done}/${exportProgress.total}` : 'Tải tất cả ảnh (.zip)'}
             </Btn>
           )}
+          <Btn onClick={downloadMaterialTemplate}>Tải file mẫu</Btn>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 600,
+            padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff', cursor: 'pointer', color: '#232019',
+          }}>
+            <Upload size={14} /> Nhập từ Excel
+            <input type="file" accept=".xlsx,.xls" onChange={handleImportFile} style={{ display: 'none' }} />
+          </label>
           <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm vật liệu</Btn>
         </div>
       </div>
@@ -2018,6 +2193,65 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     }
   };
 
+  const downloadProductTemplate = () => {
+    const rows = [
+      { 'Tên sản phẩm': 'VD: Tháp bánh sinh nhật Elsa', 'Loại': 'Tháp bánh sinh nhật', 'Màu': 'Xanh Dương', 'Giá bán': 350000, 'Mô tả': 'Gồm bánh kem, hoa giấy...', 'Link ảnh': '' },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Sản phẩm');
+    XLSX.writeFile(wb, 'mau-nhap-san-pham.xlsx');
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (rows.length === 0) { window.alert('File không có dữ liệu.'); return; }
+      const next = [...products];
+      const newCategories = [];
+      let added = 0, updated = 0;
+      rows.forEach((row) => {
+        const name = String(row['Tên sản phẩm'] || '').trim();
+        if (!name) return;
+        const category = String(row['Loại'] || '').trim();
+        const colorLabel = String(row['Màu'] || '').trim();
+        const sellPrice = Number(row['Giá bán'] || 0);
+        const description = String(row['Mô tả'] || '').trim();
+        const imageUrl = String(row['Link ảnh'] || '').trim();
+        if (category && !categories.includes(category) && !newCategories.includes(category)) newCategories.push(category);
+        const colorMatch = colors.find((c) => c.label.toLowerCase() === colorLabel.toLowerCase());
+        const idx = next.findIndex((p) => p.name.trim().toLowerCase() === name.toLowerCase());
+        const base = idx >= 0 ? next[idx] : {
+          id: uid(), name: '', laborCost: 0, decorationCost: 0, profitPct: 20, materials: [],
+          imageUrl: '', manualPrice: true, manualSellPrice: 0, category: '', color: '', description: '',
+        };
+        const updatedProduct = {
+          ...base,
+          name,
+          category: category || base.category,
+          color: colorMatch ? colorMatch.key : base.color,
+          manualPrice: true,
+          manualSellPrice: sellPrice || base.manualSellPrice,
+          description: description || base.description,
+          imageUrl: imageUrl || base.imageUrl,
+        };
+        if (idx >= 0) { next[idx] = updatedProduct; updated++; }
+        else { next.push(updatedProduct); added++; }
+      });
+      newCategories.forEach((c) => onAddCategory(c));
+      saveProducts(next);
+      window.alert(`Đã nhập xong: ${added} sản phẩm mới, ${updated} sản phẩm được cập nhật (theo đúng tên trùng khớp). Sản phẩm nhập từ Excel sẽ ở chế độ giá nhập tay — bạn có thể sửa lại thành tính theo vật liệu sau nếu cần.`);
+    } catch (err) {
+      console.error(err);
+      window.alert('Không đọc được file. Hãy chắc chắn đây là file Excel (.xlsx) đúng định dạng — bạn có thể tải file mẫu để dùng lại đúng tên cột.');
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -2033,6 +2267,14 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
               <Download size={14} /> {exportingImages ? `Đang tải... ${exportProgress.done}/${exportProgress.total}` : 'Tải tất cả ảnh (.zip)'}
             </Btn>
           )}
+          <Btn onClick={downloadProductTemplate}>Tải file mẫu</Btn>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 600,
+            padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff', cursor: 'pointer', color: '#232019',
+          }}>
+            <Upload size={14} /> Nhập từ Excel
+            <input type="file" accept=".xlsx,.xls" onChange={handleImportFile} style={{ display: 'none' }} />
+          </label>
           <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm sản phẩm</Btn>
         </div>
       </div>
@@ -3029,10 +3271,10 @@ function MenuTab({ products, computeProductCost, categories, colors, initialCate
 function CustomersTab({ customers, saveCustomers, orders }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
-  const filtered = customers.filter((c) => matchesSearch(c.name, search) || (c.phone || '').includes(search));
+  const filtered = customers.filter((c) => matchesSearch(c.name, search) || (c.phone || '').includes(search) || (c.customerCode || '').toLowerCase().includes(search.toLowerCase()));
 
   const openNew = () => setEditing({
-    id: uid(), name: '', phone: '', address: '', note: '',
+    id: uid(), name: '', phone: '', address: '', note: '', customerCode: '',
     facebookName: '', facebookLink: '', source: '', contactDate: todayStr(), budget: 0,
   });
 
@@ -3045,14 +3287,86 @@ function CustomersTab({ customers, saveCustomers, orders }) {
 
   const remove = (id) => saveCustomers(customers.filter((c) => c.id !== id));
 
+  const downloadCustomerTemplate = () => {
+    const rows = [
+      { 'Mã khách hàng': '', 'Tên khách hàng': 'VD: Nguyễn Văn A', 'SĐT': '0900000000', 'Nguồn': 'Bơ Gift', 'Tên Facebook': '', 'Link Facebook': '', 'Địa chỉ': '', 'Ngày liên hệ': todayStr(), 'Budget': 0, 'Ghi chú': '' },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Khách hàng');
+    XLSX.writeFile(wb, 'mau-nhap-khach-hang.xlsx');
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (rows.length === 0) { window.alert('File không có dữ liệu.'); return; }
+      const next = [...customers];
+      let added = 0, updated = 0;
+      rows.forEach((row) => {
+        const name = String(row['Tên khách hàng'] || '').trim();
+        if (!name) return;
+        const customerCode = String(row['Mã khách hàng'] || '').trim();
+        const phone = String(row['SĐT'] || row['Số điện thoại'] || '').trim();
+        const source = String(row['Nguồn'] || '').trim();
+        const facebookName = String(row['Tên Facebook'] || '').trim();
+        const facebookLink = String(row['Link Facebook'] || '').trim();
+        const address = String(row['Địa chỉ'] || '').trim();
+        const contactDateRaw = row['Ngày liên hệ'];
+        const contactDate = contactDateRaw ? String(contactDateRaw).trim() : '';
+        const budget = Number(row['Budget'] || row['Ngân sách'] || 0);
+        const note = String(row['Ghi chú'] || '').trim();
+        let idx = -1;
+        if (customerCode) idx = next.findIndex((c) => (c.customerCode || '').toLowerCase() === customerCode.toLowerCase());
+        if (idx === -1 && phone) idx = next.findIndex((c) => c.phone && c.phone === phone);
+        if (idx === -1) idx = next.findIndex((c) => c.name.trim().toLowerCase() === name.toLowerCase());
+        const base = idx >= 0 ? next[idx] : { id: uid(), name: '', phone: '', address: '', note: '', customerCode: '', facebookName: '', facebookLink: '', source: '', contactDate: todayStr(), budget: 0 };
+        const updatedCustomer = {
+          ...base, name,
+          customerCode: customerCode || base.customerCode,
+          phone: phone || base.phone,
+          source: source || base.source,
+          facebookName: facebookName || base.facebookName,
+          facebookLink: facebookLink || base.facebookLink,
+          address: address || base.address,
+          contactDate: contactDate || base.contactDate,
+          budget: budget || base.budget,
+          note: note || base.note,
+        };
+        if (idx >= 0) { next[idx] = updatedCustomer; updated++; }
+        else { next.push(updatedCustomer); added++; }
+      });
+      saveCustomers(next);
+      window.alert(`Đã nhập xong: ${added} khách hàng mới, ${updated} khách hàng được cập nhật (khớp theo mã KH, SĐT, hoặc tên).`);
+    } catch (err) {
+      console.error(err);
+      window.alert('Không đọc được file. Hãy chắc chắn đây là file Excel (.xlsx) đúng định dạng — bạn có thể tải file mẫu để dùng lại đúng tên cột.');
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
           <Search size={15} style={{ position: 'absolute', left: 10, top: 10, color: '#8A8574' }} />
-          <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm theo tên hoặc SĐT..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input style={{ ...inputStyle, paddingLeft: 32 }} placeholder="Tìm theo tên, SĐT hoặc mã KH..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm khách hàng</Btn>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Btn onClick={downloadCustomerTemplate}>Tải file mẫu</Btn>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 600,
+            padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff', cursor: 'pointer', color: '#232019',
+          }}>
+            <Upload size={14} /> Nhập từ Excel
+            <input type="file" accept=".xlsx,.xls" onChange={handleImportFile} style={{ display: 'none' }} />
+          </label>
+          <Btn variant="primary" onClick={openNew}><Plus size={15} /> Thêm khách hàng</Btn>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -3066,7 +3380,17 @@ function CustomersTab({ customers, saveCustomers, orders }) {
             return (
               <Card key={c.id} style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {c.customerCode && (
+                      <span style={{
+                        fontSize: 11.5, fontWeight: 700, color: '#1E2A38', fontFamily: 'ui-monospace, monospace',
+                        background: '#EFEBDE', border: '1px solid #D7D2C2', borderRadius: 4, padding: '1px 7px',
+                      }}>
+                        {c.customerCode}
+                      </span>
+                    )}
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</span>
+                  </div>
                   <div style={{ fontSize: 12.5, color: '#8A8574' }}>{c.phone}{c.address ? ` · ${c.address}` : ''}</div>
                   <div style={{ fontSize: 12, color: '#8A8574', marginTop: 2 }}>
                     {c.source && <span>Nguồn: {c.source}</span>}
@@ -3088,7 +3412,7 @@ function CustomersTab({ customers, saveCustomers, orders }) {
 
       {editing && (
         <Modal title={customers.some((c) => c.id === editing.id) ? 'Sửa khách hàng' : 'Thêm khách hàng'} onClose={() => setEditing(null)} width={520}>
-          <CustomerForm data={editing} onSubmit={submit} onCancel={() => setEditing(null)} />
+          <CustomerForm data={editing} onSubmit={submit} onCancel={() => setEditing(null)} customers={customers} isNew={!customers.some((c) => c.id === editing.id)} />
         </Modal>
       )}
     </div>
@@ -3136,13 +3460,54 @@ function generateOrderCode(orderDate, source, existingCodes) {
   return `${base}-${n}`;
 }
 
-function CustomerForm({ data, onSubmit, onCancel }) {
+// Mã khách hàng dùng bảng mã riêng (tách Giỏ quà tết 3k / 30k ra 2 mã khác nhau,
+// khác với mã đơn hàng vốn gộp chung).
+const CUSTOMER_SOURCE_CODE_MAP = {
+  'Bách Hóa Nhà Bơ': 'BHNB',
+  'Bơ Gift': 'BG',
+  'Giỏ quà tết 3k follow': 'GQT3K',
+  'Giỏ quà tết 30k follow': 'GQT30K',
+  'Khách liên hệ Zalo': 'ZL',
+};
+
+function customerSourceCode(source) {
+  if (CUSTOMER_SOURCE_CODE_MAP[source]) return CUSTOMER_SOURCE_CODE_MAP[source];
+  return sourceToCode(source);
+}
+
+function generateCustomerCode(source, existingCustomers) {
+  const prefix = `KH${customerSourceCode(source)}`;
+  let maxNum = 0;
+  existingCustomers.forEach((c) => {
+    if (c.customerCode && c.customerCode.toUpperCase().startsWith(prefix.toUpperCase())) {
+      const num = parseInt(c.customerCode.slice(prefix.length), 10);
+      if (!isNaN(num) && num > maxNum) maxNum = num;
+    }
+  });
+  return `${prefix}${String(maxNum + 1).padStart(2, '0')}`;
+}
+
+function CustomerForm({ data, onSubmit, onCancel, customers, isNew }) {
   const [form, setForm] = useState(data);
+  const [codeTouched, setCodeTouched] = useState(!!data.customerCode);
   const isKnownSource = !form.source || CUSTOMER_SOURCES.includes(form.source);
+
+  useEffect(() => {
+    if (isNew && !codeTouched) {
+      setForm((f) => ({ ...f, customerCode: generateCustomerCode(f.source, customers) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.source, isNew, codeTouched]);
+
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!form.name.trim()) return; onSubmit(form); }}>
       <Field label="Tên khách hàng">
         <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+      </Field>
+      <Field label="Mã khách hàng">
+        <input style={inputStyle} value={form.customerCode || ''}
+          onChange={(e) => { setCodeTouched(true); setForm({ ...form, customerCode: e.target.value }); }}
+          placeholder="VD: KHBG01" />
       </Field>
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
@@ -3333,6 +3698,108 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
     setTimeout(() => win.print(), 300);
   };
 
+  const downloadOrderTemplate = () => {
+    const rows = [
+      {
+        'Mã đơn': '', 'Tên khách hàng': 'VD: Nguyễn Văn A', 'SĐT khách': '0900000000', 'Nguồn': 'Bơ Gift',
+        'Ngày đặt': todayStr(), 'Ngày giao': '', 'Trạng thái': 'Mới',
+        'Sản phẩm/nội dung': 'VD: Tháp bánh sinh nhật Elsa', 'Số lượng': 1, 'Đơn giá': 350000,
+        'Hình thức giao hàng': '', 'Đơn vị vận chuyển': '', 'Mã vận đơn': '',
+        'Nội dung tag/in': '', 'Phí ship': 0, 'Đã cọc': 0, 'Ghi chú': '',
+      },
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Đơn hàng');
+    XLSX.writeFile(wb, 'mau-nhap-don-hang.xlsx');
+  };
+
+  const handleImportOrders = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (rows.length === 0) { window.alert('File không có dữ liệu.'); return; }
+      const next = [...orders];
+      const existingCodes = next.map((o) => o.orderCode).filter(Boolean);
+      let added = 0, updated = 0;
+      rows.forEach((row) => {
+        const customerName = String(row['Tên khách hàng'] || '').trim();
+        const productName = String(row['Sản phẩm/nội dung'] || '').trim();
+        if (!customerName && !productName) return;
+
+        const phone = String(row['SĐT khách'] || '').trim();
+        const source = String(row['Nguồn'] || '').trim();
+        const orderCodeInput = String(row['Mã đơn'] || '').trim();
+        const orderDate = row['Ngày đặt'] ? String(row['Ngày đặt']).trim() : todayStr();
+        const deliveryDate = row['Ngày giao'] ? String(row['Ngày giao']).trim() : '';
+        const statusLabel = String(row['Trạng thái'] || '').trim();
+        const statusMatch = STATUS.find((s) => s.label.toLowerCase() === statusLabel.toLowerCase());
+        const qty = Number(row['Số lượng'] || 1) || 1;
+        const price = Number(row['Đơn giá'] || 0);
+        const deliveryMethod = String(row['Hình thức giao hàng'] || '').trim();
+        const shippingCarrier = String(row['Đơn vị vận chuyển'] || '').trim();
+        const trackingCode = String(row['Mã vận đơn'] || '').trim();
+        const printRequest = String(row['Nội dung tag/in'] || '').trim();
+        const shippingFee = Number(row['Phí ship'] || 0);
+        const depositAmount = Number(row['Đã cọc'] || 0);
+        const note = String(row['Ghi chú'] || '').trim();
+
+        // Tìm đúng khách hàng theo SĐT hoặc tên (nếu có), không bắt buộc phải khớp.
+        let matchedCustomer = null;
+        if (phone) matchedCustomer = customers.find((c) => c.phone && c.phone === phone);
+        if (!matchedCustomer && customerName) matchedCustomer = customers.find((c) => c.name.trim().toLowerCase() === customerName.toLowerCase());
+
+        const item = productName ? { manual: true, name: productName, qty, price } : null;
+
+        let orderCode = orderCodeInput;
+        if (!orderCode) {
+          orderCode = generateOrderCode(orderDate, matchedCustomer?.source || source, existingCodes);
+          existingCodes.push(orderCode);
+        }
+
+        const existingIdx = orderCodeInput ? next.findIndex((o) => o.orderCode === orderCodeInput) : -1;
+
+        const base = existingIdx >= 0 ? next[existingIdx] : {
+          id: uid(), orderCode, customerId: matchedCustomer?.id || '', customerName: matchedCustomer ? '' : customerName,
+          source: matchedCustomer?.source || source, orderDate, deliveryDate, status: 'moi', note: '',
+          items: [], shippingFee: 0, depositAmount: 0, deliveryMethod: '', shippingCarrier: '', trackingCode: '', printRequest: '',
+        };
+
+        const updatedOrder = {
+          ...base,
+          orderCode: base.orderCode || orderCode,
+          customerId: matchedCustomer?.id || base.customerId,
+          customerName: matchedCustomer ? base.customerName : (customerName || base.customerName),
+          source: source || base.source,
+          orderDate: orderDate || base.orderDate,
+          deliveryDate: deliveryDate || base.deliveryDate,
+          status: statusMatch ? statusMatch.key : base.status,
+          items: item ? [...(base.items || []), item] : base.items,
+          deliveryMethod: deliveryMethod || base.deliveryMethod,
+          shippingCarrier: shippingCarrier || base.shippingCarrier,
+          trackingCode: trackingCode || base.trackingCode,
+          printRequest: printRequest || base.printRequest,
+          shippingFee: shippingFee || base.shippingFee,
+          depositAmount: depositAmount || base.depositAmount,
+          note: note || base.note,
+        };
+
+        if (existingIdx >= 0) { next[existingIdx] = updatedOrder; updated++; }
+        else { next.push(updatedOrder); added++; }
+      });
+      saveOrders(next);
+      window.alert(`Đã nhập xong: ${added} đơn hàng mới, ${updated} đơn được cập nhật (khớp theo Mã đơn nếu có điền). Mỗi dòng trong file là 1 sản phẩm — muốn 1 đơn có nhiều sản phẩm, dùng chung 1 "Mã đơn" ở nhiều dòng liên tiếp.`);
+    } catch (err) {
+      console.error(err);
+      window.alert('Không đọc được file. Hãy chắc chắn đây là file Excel (.xlsx) đúng định dạng — bạn có thể tải file mẫu để dùng lại đúng tên cột.');
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, gap: 10, flexWrap: 'wrap' }}>
@@ -3358,7 +3825,17 @@ function OrdersTab({ orders, saveOrders, customers, products, customerMap, produ
             color: onlyUnpaid ? '#fff' : '#6B6759', fontWeight: 600,
           }}>Còn phải thu tiền</button>
         </div>
-        <Btn variant="primary" onClick={openNew}><Plus size={15} /> Tạo đơn hàng</Btn>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Btn onClick={downloadOrderTemplate}>Tải file mẫu</Btn>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 600,
+            padding: '7px 12px', borderRadius: 6, border: '1px solid #D7D2C2', background: '#fff', cursor: 'pointer', color: '#232019',
+          }}>
+            <Upload size={14} /> Nhập từ Excel
+            <input type="file" accept=".xlsx,.xls" onChange={handleImportOrders} style={{ display: 'none' }} />
+          </label>
+          <Btn variant="primary" onClick={openNew}><Plus size={15} /> Tạo đơn hàng</Btn>
+        </div>
       </div>
 
       {sorted.length === 0 ? (
