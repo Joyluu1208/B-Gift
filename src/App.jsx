@@ -2062,6 +2062,33 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
     }
   };
 
+  const [migratingImages, setMigratingImages] = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState({ done: 0, total: 0 });
+  const oldImageCount = products.filter((p) => p.imageUrl && p.imageUrl.startsWith('data:')).length;
+
+  const handleMigrateImages = async () => {
+    const toMigrate = products.filter((p) => p.imageUrl && p.imageUrl.startsWith('data:'));
+    if (toMigrate.length === 0) { window.alert('Không có sản phẩm nào cần chuyển ảnh.'); return; }
+    setMigratingImages(true);
+    setMigrateProgress({ done: 0, total: toMigrate.length });
+    const updates = {};
+    for (let i = 0; i < toMigrate.length; i++) {
+      const p = toMigrate[i];
+      try {
+        const blob = dataUrlToBlob(p.imageUrl);
+        const file = new File([blob], `${p.name || 'anh'}.jpg`, { type: blob.type || 'image/jpeg' });
+        const url = await storage.uploadImage(file);
+        updates[p.id] = url;
+      } catch (err) {
+        console.error('Lỗi chuyển ảnh', p.name, err);
+      }
+      setMigrateProgress({ done: i + 1, total: toMigrate.length });
+    }
+    saveProducts(products.map((p) => (updates[p.id] ? { ...p, imageUrl: updates[p.id] } : p)));
+    setMigratingImages(false);
+    window.alert(`Đã chuyển xong ${Object.keys(updates).length}/${toMigrate.length} ảnh sang kho lưu trữ. Giờ vào "Xuất Excel" sẽ thấy link ảnh thật cho các sản phẩm này.`);
+  };
+
   const downloadProductTemplate = () => {
     const rows = [
       { 'Tên sản phẩm': 'VD: Tháp bánh sinh nhật Elsa', 'Loại': 'Tháp bánh sinh nhật', 'Màu': 'Xanh Dương', 'Giá bán': 350000, 'Mô tả': 'Gồm bánh kem, hoa giấy...', 'Link ảnh': '' },
@@ -2134,6 +2161,11 @@ function ProductsTab({ products, saveProducts, materials, computeProductCost, ca
           {products.some((p) => p.imageUrl) && (
             <Btn onClick={handleExportImages} disabled={exportingImages}>
               <Download size={14} /> {exportingImages ? `Đang tải... ${exportProgress.done}/${exportProgress.total}` : 'Tải tất cả ảnh (.zip)'}
+            </Btn>
+          )}
+          {oldImageCount > 0 && (
+            <Btn onClick={handleMigrateImages} disabled={migratingImages}>
+              <Upload size={14} /> {migratingImages ? `Đang chuyển... ${migrateProgress.done}/${migrateProgress.total}` : `Chuyển ${oldImageCount} ảnh cũ lên kho lưu trữ`}
             </Btn>
           )}
           <Btn onClick={downloadProductTemplate}>Tải file mẫu</Btn>
@@ -2901,6 +2933,17 @@ async function downloadImage(url, filename) {
 
 // Tải nhiều ảnh cùng lúc, gom vào 1 file .zip để tải về máy — dùng khi cần sao lưu
 // toàn bộ ảnh sản phẩm/vật liệu. Chỉ hoạt động trên bản web thật đã cài thư viện jszip.
+// Chuyển 1 chuỗi ảnh dạng base64 (data:...) thành Blob thật để tải lên kho lưu trữ.
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(',');
+  const mimeMatch = header.match(/data:(.*?);base64/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const binary = atob(base64);
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+  return new Blob([array], { type: mime });
+}
+
 async function exportImagesAsZip(items, zipFilename, onProgress) {
   const mod = await import('jszip');
   const JSZip = mod.default || mod;
