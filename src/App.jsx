@@ -793,28 +793,33 @@ function AdminApp() {
   const orderTotal = (order) => (order.items || []).reduce((s, it) => s + it.price * it.qty, 0) + Number(order.shippingFee || 0);
 
   const exportExcel = () => {
-    const wb = XLSX.utils.book_new();
+    try {
+      const wb = XLSX.utils.book_new();
 
-    const prodSheet = products.map((p) => {
-      const { cost, sell } = computeProductCost(p);
-      const colorLabel = allColors.find((c) => c.key === p.color)?.label || '';
-      return {
-        'Tên sản phẩm': p.name,
-        'Loại': p.category || '',
-        'Màu': colorLabel,
-        'Chế độ giá': p.manualPrice ? 'Nhập tay' : 'Tính theo vật liệu',
-        'Giá vốn': cost == null ? '' : Math.round(cost),
-        'Giá bán': Math.round(sell),
-        'Tiền trang trí': Number(p.decorationCost || 0),
-        'Chi phí công': Number(p.laborCost || 0),
-        'Lợi nhuận %': Number(p.profitPct || 0),
-        'Mô tả': p.description || '',
-        'Link ảnh': p.imageUrl || '',
-      };
-    });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodSheet), 'Sản phẩm');
+      const prodSheet = products.map((p) => {
+        const { cost, sell } = computeProductCost(p);
+        const colorLabel = allColors.find((c) => c.key === p.color)?.label || '';
+        return {
+          'Tên sản phẩm': p.name,
+          'Loại': p.category || '',
+          'Màu': colorLabel,
+          'Chế độ giá': p.manualPrice ? 'Nhập tay' : 'Tính theo vật liệu',
+          'Giá vốn': cost == null ? '' : Math.round(cost),
+          'Giá bán': Math.round(sell),
+          'Tiền trang trí': Number(p.decorationCost || 0),
+          'Chi phí công': Number(p.laborCost || 0),
+          'Lợi nhuận %': Number(p.profitPct || 0),
+          'Mô tả': p.description || '',
+          'Link ảnh': p.imageUrl || '',
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodSheet), 'Sản phẩm');
 
-    XLSX.writeFile(wb, `bo-gift-so-lieu-${todayStr()}.xlsx`);
+      XLSX.writeFile(wb, `bo-gift-so-lieu-${todayStr()}.xlsx`);
+    } catch (err) {
+      console.error('Lỗi xuất Excel', err);
+      window.alert('Có lỗi khi xuất Excel: ' + (err?.message || err));
+    }
   };
 
   const NAV = [
