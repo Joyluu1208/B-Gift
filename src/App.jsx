@@ -796,6 +796,19 @@ function AdminApp() {
     try {
       const wb = XLSX.utils.book_new();
 
+      // Excel giới hạn tối đa ~32.767 ký tự/ô — vài sản phẩm cũ (tạo trước khi
+      // đổi sang lưu ảnh trên Supabase Storage) vẫn còn lưu ảnh dạng chuỗi
+      // base64 rất dài, cần thay bằng ghi chú ngắn thay vì chèn thẳng vào.
+      const safeCell = (val) => {
+        if (typeof val !== 'string') return val;
+        if (val.length > 30000) {
+          return val.startsWith('data:')
+            ? '(ảnh cũ dạng dữ liệu nhúng — mở sản phẩm trong web để xem/tải ảnh trực tiếp)'
+            : val.slice(0, 30000) + '...(đã cắt bớt do quá dài)';
+        }
+        return val;
+      };
+
       const prodSheet = products.map((p) => {
         const { cost, sell } = computeProductCost(p);
         const colorLabel = allColors.find((c) => c.key === p.color)?.label || '';
@@ -809,8 +822,8 @@ function AdminApp() {
           'Tiền trang trí': Number(p.decorationCost || 0),
           'Chi phí công': Number(p.laborCost || 0),
           'Lợi nhuận %': Number(p.profitPct || 0),
-          'Mô tả': p.description || '',
-          'Link ảnh': p.imageUrl || '',
+          'Mô tả': safeCell(p.description || ''),
+          'Link ảnh': safeCell(p.imageUrl || ''),
         };
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prodSheet), 'Sản phẩm');
